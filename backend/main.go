@@ -53,8 +53,8 @@ func main() {
 	listener, err := net.Listen("tcp", "localhost:18520")
 	if err != nil {
 		if devMode == "true" {
-			log.Fatalf("端口 18520 被占用！请关闭占用该端口的程序后重试。\n"+
-				"  Vite proxy 固定指向 18520，开发模式不可使用随机端口。\n"+
+			log.Fatalf("端口 18520 被占用！请关闭占用该端口的程序后重试。\n" +
+				"  Vite proxy 固定指向 18520，开发模式不可使用随机端口。\n" +
 				"  执行: netstat -ano | findstr 18520  查看占用进程")
 		}
 		// 生产模式：回退到随机端口
@@ -90,7 +90,13 @@ func main() {
 	// === 打开 WebView2 窗口 ===
 	openWebView(frontendURL)
 
-	// === 等待退出信号 ===
+	if runtime.GOOS == "windows" {
+		// WebView2 窗口已关闭，直接退出
+		log.Println("窗口已关闭，程序退出")
+		return
+	}
+
+	// === 等待退出信号（非 Windows 下收到 Ctrl+C 时优雅退出） ===
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	<-sigCh

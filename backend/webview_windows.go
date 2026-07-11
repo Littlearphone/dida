@@ -3,13 +3,19 @@
 package main
 
 import (
+	_ "embed"
 	"log"
+	"os"
 	"syscall"
+	"unsafe"
 
 	"github.com/jchv/go-webview2"
 )
 
-// user32 懒加载，供窗口最大化使用
+//go:embed icon.ico
+var iconData []byte
+
+// user32 懒加载，供窗口最大化 + 图标设置使用
 var user32 = syscall.NewLazyDLL("user32.dll")
 
 // init 在进程启动时设置 DPI 感知，确保高 DPI 屏幕下 WebView2 内容清晰渲染
@@ -39,6 +45,9 @@ func createWebViewWindow(frontendURL string) {
 	w := webview2.New(true)
 	defer w.Destroy()
 
+	// 设置窗口图标（从嵌入的 icon.ico 加载）
+	setWindowIcon(uintptr(w.Window()))
+
 	// 设置窗口标题和默认最小尺寸（防止最大化后缩得太小）
 	w.SetTitle("AI 小说编辑器")
 	w.SetSize(960, 640, webview2.HintMin)
@@ -52,4 +61,61 @@ func createWebViewWindow(frontendURL string) {
 
 	log.Println("WebView2 窗口已创建（最大化），导航到:", frontendURL)
 	w.Run() // 阻塞运行，直到用户关闭窗口
+}
+
+// setWindowIcon 从嵌入的 .ico 数据设置窗口图标
+func setWindowIcon(hwnd uintptr) {
+	// 将嵌入的图标写入临时文件，用 LoadImageW 加载为 HICON
+	tmp, err := os.CreateTemp("", "dida-*.ico")
+	if err != nil {
+		log.Printf("创建临时图标文件失败: %v", err)
+		return
+	}
+	tmpPath := tmp.Name()
+	if _, err := tmp.Write(iconData); err != nil {
+		log.Printf("写入临时图标失败: %v", err)
+		tmp.Close()
+		os.Remove(tmpPath)
+		return
+	}
+	tmp.Close()
+	defer os.Remove(tmpPath)
+
+	// LoadImageW: 从文件加载图标为 HICON
+	loadImage := user32.NewProc("LoadImageW")
+	// 参数: hinst, name, type, cx, cy, fuLoad
+	const IMAGE_ICON = 1
+	const LR_LOADFROMFILE = 0x00000010
+
+	// 大图标 (32x32)
+	hicon, _, _ := loadImage.Call(
+		0,
+		uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr(tmpPath))),
+		IMAGE_ICON,
+		0, 0,
+		LR_LOADFROMFILE,
+	)
+	if hicon == 0 {
+		log.Printf("加载大图标失败")
+		return
+	}
+
+	// WM_SETICON = 0x0080, ICON_BIG = 1, ICON_SMALL = 0
+	const WM_SETICON = 0x0080
+	sendMessage := user32.NewProc("SendMessageW")
+	sendMessage.Call(hwnd, WM_SETICON, 1, hicon) // ICON_BIG
+
+	// 小图标 (16x16) - 从同一文件加载，系统会自动选合适尺寸
+	hiconSmall, _, _ := loadImage.Call(
+		0,
+		uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr(tmpPath))),
+		IMAGE_ICON,
+		16, 16,
+		LR_LOADFROMFILE,
+	)
+	if hiconSmall != 0 {
+		sendMessage.Call(hwnd, WM_SETICON, 0, hiconSmall) // ICON_SMALL
+	}
+
+	log.Println("窗口图标已设置")
 }

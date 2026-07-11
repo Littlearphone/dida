@@ -3,8 +3,9 @@ AI 小说编辑器 — Go + WebView2 + Vue3/NaiveUI 桌面应用。双击 `dida.
 
 ## 目录结构
 - `backend/` — Go 后端源码（HTTP API + WebView2）
+  - `icon.ico` — 程序图标（通过 `//go:embed` 嵌入二进制）
 - `frontend/` — Vue3 + NaiveUI + Vite 前端
-- `build/` — 构建脚本
+- `build/` — 构建脚本 + 图标源文件
 - `dida.exe` — 构建产物（已忽略）
 
 ## 构建方式
