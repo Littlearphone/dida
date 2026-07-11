@@ -4,6 +4,8 @@ package main
 
 import (
 	"log"
+
+	"github.com/jchv/go-webview2"
 )
 
 // createWebViewWindow 在 Windows 上创建 WebView2 窗口
