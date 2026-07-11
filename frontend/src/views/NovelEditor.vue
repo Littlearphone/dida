@@ -123,15 +123,19 @@ const wordCount = computed(() =>
   (editContent.value.replace(/<[^>]*>/g, '').replace(/\s/g, '')).length,
 )
 
-// === 格式化工具有空行时可用 ===
+// === 格式化工具有多余空段落时可用 ===
 const canFormat = computed(() => {
-  const text = editContent.value
-  const lines = text.split('\n')
-  return lines.some(l => l.trim().length === 0) && lines.length > 1
+  const html = editContent.value
+  if (!html) return false
+  // HTML 中有空段落（<p></p> 或 <p><br></p>）且至少有一个非空段落
+  return /<p>\s*<\/p>|<p>\s*<br>\s*<\/p>/i.test(html) && /<p>[^<]+<\/p>/i.test(html)
 })
 
 function formatContent() {
-  const formatted = editContent.value.split('\n').filter(l => l.trim().length > 0).join('\n')
+  // 删除所有空段落（保留非空段落）
+  const formatted = editContent.value
+    .replace(/<p>\s*<\/p>/gi, '')
+    .replace(/<p>\s*<br\s*\/?>\s*<\/p>/gi, '')
   if (formatted !== editContent.value) setEditorContent(formatted)
 }
 
@@ -293,19 +297,19 @@ function closeSearch() {
 function handleKeydown(e: KeyboardEvent) {
   const isCtrl = e.ctrlKey || e.metaKey
 
-  // Ctrl+F：打开搜索+替换；已打开则关闭
+  // Ctrl+F：开关搜索栏（不影响替换栏）
   if (isCtrl && e.key === 'f' && !e.shiftKey) {
     e.preventDefault()
     if (showSearch.value) { closeSearch(); return }
     showSearch.value = true
-    showReplace.value = true
     nextTick(() => (document.querySelector('.search-input input') as HTMLInputElement)?.focus())
     return
   }
 
-  // Ctrl+H：打开搜索 + 替换栏
+  // Ctrl+H：开关替换栏（自动补开搜索栏，关闭时保留搜索栏）
   if (isCtrl && e.key === 'h') {
     e.preventDefault()
+    if (showReplace.value) { showReplace.value = false; return }
     showSearch.value = true
     showReplace.value = true
     nextTick(() => (document.querySelector('.replace-input input') as HTMLInputElement)?.focus())
