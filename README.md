@@ -17,8 +17,9 @@
 
 ### 🤖 AI 智能写作（DeepSeek）
 - **AI 续写** — 设置要求，AI 续接内容，支持插入末尾或新建章节
-- **AI 润色** — 选中内容或整章润色，左右对比，支持替换原文
-- **AI 扩写** — 选中内容或整章扩写，丰富细节描写
+- **AI 润色** — 选中内容或整章润色，左右对比，结果可编辑后替换原文
+- **AI 扩写** — 选中内容或整章扩写，丰富细节描写，结果可自由编辑后使用
+- 选中内容预览 — 弹框内显示选中文本，可关闭选中切换为整章操作
 - 智能导入拆分 — 导入时自动识别章节结构
 - 内容提取 — 提取大纲、主要角色、人物关系、事件时间线
 
@@ -77,7 +78,7 @@ build\build.bat
 
 **Linux/macOS (Git Bash)**
 ```bash
-bash build.sh
+bash build/build.sh
 # 输出: dida.exe
 ```
 
@@ -144,8 +145,8 @@ dida/
 │   ├── index.html
 │   └── vite.config.ts
 ├── build/
-│   └── build.bat                # Windows 构建脚本
-├── build.sh                     # Git Bash 构建脚本
+│   ├── build.bat                # Windows 构建脚本
+│   └── build.sh                 # Git Bash 构建脚本
 └── README.md
 ```
 
