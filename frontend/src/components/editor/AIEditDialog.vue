@@ -35,6 +35,25 @@ const savedSelectionText = ref('')
 let abortController: AbortController | null = null
 let progressTimer: ReturnType<typeof setInterval> | null = null
 
+/** 清理 AI 请求相关资源 */
+function cleanupRequest() {
+  if (loading.value) cancelEdit()
+  stopProgressSimulation()
+  abortController = null
+}
+
+/** 重置所有对话框状态（不含 emit） */
+function resetState() {
+  requirement.value = ''
+  editResult.value = ''
+  originalContent.value = ''
+  showResult.value = false
+  hasSelection.value = false
+  savedSelectionText.value = ''
+  progress.value = 0
+  progressText.value = ''
+}
+
 const title = props.mode === 'polish' ? 'AI 润色' : 'AI 扩写'
 const resultLabel = props.mode === 'polish' ? '润色后' : '扩写后'
 
@@ -42,6 +61,12 @@ const resultLabel = props.mode === 'polish' ? '润色后' : '扩写后'
 function checkSelection() {
   savedSelectionText.value = editorActions.getSelectionText?.()?.trim() || ''
   hasSelection.value = !!savedSelectionText.value
+}
+
+/** 清除选中状态，改为使用整章内容 */
+function clearSelection() {
+  hasSelection.value = false
+  savedSelectionText.value = ''
 }
 
 function startProgressSimulation() {
@@ -150,23 +175,19 @@ function copyResult() {
 }
 
 function closeDialog() {
-  if (loading.value) cancelEdit()
-  stopProgressSimulation()
-  abortController = null
+  cleanupRequest()
   emit('update:show', false)
-  requirement.value = ''
-  editResult.value = ''
-  originalContent.value = ''
-  showResult.value = false
-  hasSelection.value = false
-  savedSelectionText.value = ''
-  progress.value = 0
-  progressText.value = ''
+  resetState()
 }
 
-// 弹框打开时检测选中状态
+// 弹框打开时检测选中状态；关闭时重置状态（覆盖 Escape 等非按钮关闭途径）
 watch(() => props.show, (open) => {
-  if (open) checkSelection()
+  if (open) {
+    checkSelection()
+  } else {
+    cleanupRequest()
+    resetState()
+  }
 })
 
 onUnmounted(() => {
@@ -180,10 +201,17 @@ onUnmounted(() => {
     :mask-closable="false" draggable @update:show="emit('update:show', $event)">
     <!-- 输入阶段：包裹在 div 中以匹配全局 CSS ".n-card-content > div" -->
     <div v-if="!showResult" style="display: flex; flex-direction: column; flex: 1; min-height: 0;">
-      <!-- 有选中时显示提示和选中内容预览 -->
+      <!-- 有选中时显示提示和选中内容预览（可关闭取消选中） -->
       <div v-if="hasSelection" style="flex-shrink: 0; margin-bottom: 12px">
         <n-alert type="info" :bordered="false" style="line-height: 1.6;">
-          <div style="font-weight: 500; margin-bottom: 6px;">当前选中内容将被{{ mode === 'polish' ? '润色' : '扩写' }}</div>
+          <template #header>
+            <div style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
+              <span>当前选中内容将被{{ mode === 'polish' ? '润色' : '扩写' }}</span>
+              <n-button tertiary circle size="tiny" @click.stop="clearSelection" title="取消选中，改用整章内容">
+                <template #icon><n-icon size="14"><CloseIcon/></n-icon></template>
+              </n-button>
+            </div>
+          </template>
           <div style="font-size: 12px; color: #666; white-space: pre-wrap; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;">
             {{ savedSelectionText }}
           </div>
@@ -220,20 +248,27 @@ onUnmounted(() => {
         </n-gi>
         <n-gi style="display: flex; flex-direction: column; min-height: 0;">
           <n-alert type="success" :bordered="false" style="flex-shrink: 0; margin-bottom: 8px;">{{ resultLabel }}</n-alert>
-          <div style="flex: 1; min-height: 0; overflow-y: auto; border: 1px solid #2080f0; border-radius: 6px; background: #fafafa;">
-            <div style="padding: 16px; white-space: pre-wrap; line-height: 1.8; font-size: 14px; color: #333; min-height: 80px;">
-              {{ editResult || (loading ? '等待 AI 响应...' : '') }}
-            </div>
-          </div>
+          <n-input
+            v-model:value="editResult"
+            type="textarea"
+            :disabled="loading"
+            placeholder="等待 AI 响应..."
+            :resizable="false"
+            style="flex: 1; min-height: 60px;"
+          />
         </n-gi>
       </n-grid>
 
       <!-- 无选中文本时：单栏预览（同续写） -->
-      <div v-else style="flex: 1; min-height: 0; overflow-y: auto; border: 1px solid #2080f0; border-radius: 6px; background: #fafafa;">
-        <div style="padding: 20px; white-space: pre-wrap; line-height: 1.8; font-size: 15px; color: #333; min-height: 80px;">
-          {{ editResult || (loading ? '等待 AI 响应...' : '') }}
-        </div>
-      </div>
+      <n-input
+        v-else
+        v-model:value="editResult"
+        type="textarea"
+        :disabled="loading"
+        placeholder="等待 AI 响应..."
+        :resizable="false"
+        style="flex: 1; min-height: 60px;"
+      />
     </div>
 
     <template #footer>

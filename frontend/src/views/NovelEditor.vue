@@ -68,16 +68,14 @@ provide(EDITOR_ACTIONS_KEY, {
   },
   replaceSelection: (text: string) => {
     if (!editor.value) return
-    const { from, to } = editor.value.state.selection
-    if (from === to) {
-      // 无选区时追加到末尾
-      editor.value.commands.insertContentAt(editor.value.state.doc.content.size, text)
-    } else {
-      editor.value.chain().focus().command(({ tr }) => {
-        tr.replaceWith(from, to, editor.value!.schema.text(text))
-        return true
-      }).run()
-    }
+    const { state, view } = editor.value
+    const { from, to } = state.selection
+    // 直接构造并派发单次事务，避免 chain().focus() 产生两次独立事务
+    const tr = from === to
+      ? state.tr.insertText(text, state.doc.content.size)
+      : state.tr.replaceWith(from, to, state.schema.text(text))
+    view.dispatch(tr)
+    view.focus()
     contentChanged.value = true
   },
 })
