@@ -470,7 +470,9 @@ onUnmounted(() => {
 
       <div class="editor-area">
         <div v-if="currentChapter" class="editor-content" :style="editorStyles">
-          <editor-content :editor="editor" class="content-editable" />
+          <div class="editor-page">
+            <editor-content :editor="editor" class="content-editable" />
+          </div>
         </div>
         <div v-else class="editor-empty">
           <n-text depth="3">还没有章节，请创建第一章</n-text>
@@ -528,20 +530,63 @@ onUnmounted(() => {
 
 .editor-content { flex: 1; overflow-y: auto; background: #f0f2f5; }
 
-.content-editable {
+/* Word 风格的"页面"容器：白底、阴影、四角对齐标记 */
+.editor-page {
   width: 100%; max-width: 960px; min-height: 100%;
-  margin: 0 auto; padding: 48px 64px 64px;
-  background: #fff; outline: none;
-  white-space: pre-wrap; box-sizing: border-box;
+  margin: 0 auto; background: #fff;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
-  /* 使用 flex 让 .ProseMirror 撑满空白区域，而非仅内容高度 */
+  position: relative;
+  /* flex 撑满页面高度，使底部两角标对齐到页面底部 */
   display: flex; flex-direction: column;
+}
+
+.content-editable {
+  padding: 48px 64px 64px;
+  outline: none;
+  white-space: pre-wrap; box-sizing: border-box;
+  position: relative; /* 四角标记定位锚点 */
+  flex: 1; /* 撑满 .editor-page 剩余空间 */
 }
 .content-editable:focus,
 .content-editable:focus-visible,
 .content-editable:focus-within {
   outline: none;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+
+/* ── 四角对齐标记（Word 风格 crop marks）── */
+/* 拐角位于文字区域边界，短边朝外延伸 */
+/* 左上角 ┘ */
+.editor-page::before {
+  content: ''; position: absolute; pointer-events: none; z-index: 1;
+  /* 文字区域左上角 (padding: 48 64)，┘ 拐角在盒子右下 */
+  top: 28px; left: 44px;
+  width: 20px; height: 20px;
+  border-right: 2px solid #c0c0c0;
+  border-bottom: 2px solid #c0c0c0;
+}
+/* 右上角 └ */
+.editor-page::after {
+  content: ''; position: absolute; pointer-events: none; z-index: 1;
+  top: 28px; right: 44px;
+  width: 20px; height: 20px;
+  border-left: 2px solid #c0c0c0;
+  border-bottom: 2px solid #c0c0c0;
+}
+/* 左下角 ┐ */
+.content-editable::before {
+  content: ''; position: absolute; pointer-events: none; z-index: 1;
+  bottom: 44px; left: 44px;
+  width: 20px; height: 20px;
+  border-right: 2px solid #c0c0c0;
+  border-top: 2px solid #c0c0c0;
+}
+/* 右下角 ┌ */
+.content-editable::after {
+  content: ''; position: absolute; pointer-events: none; z-index: 1;
+  bottom: 44px; right: 44px;
+  width: 20px; height: 20px;
+  border-left: 2px solid #c0c0c0;
+  border-top: 2px solid #c0c0c0;
 }
 
 .content-editable :deep(p) {
@@ -572,6 +617,5 @@ onUnmounted(() => {
   outline: none !important;
   border: none !important;
   box-shadow: none !important;
-  flex: 1; /* 撑满 .content-editable 剩余空间，使空白区域可点击编辑 */
 }
 </style>
