@@ -235,10 +235,10 @@ onUnmounted(() => {
             @dragend="handleDragEnd">
             <div class="chapter-index">{{ i + 1 }}</div>
             <div class="chapter-info">
-              <n-text ellipsis style="font-size: 13px;" @dblclick.stop="startRenameChapter(ch)">
+              <n-text ellipsis style="font-size: 13px; white-space: nowrap;" @dblclick.stop="startRenameChapter(ch)">
                 {{ ch.title || `第${i + 1}章` }}
               </n-text>
-              <n-text depth="3" style="font-size: 11px; line-height: 1.4;">{{ ch.wordCount }} 字</n-text>
+              <n-text depth="3" style="font-size: 11px; line-height: 1.4; white-space: nowrap;">{{ ch.wordCount }} 字</n-text>
             </div>
             <n-button text size="tiny" class="chapter-del-btn" @click.stop="confirmDeleteChapter(ch)">
               <template #icon><n-icon size="14"><DeleteIcon /></n-icon></template>
@@ -314,6 +314,7 @@ onUnmounted(() => {
 <style scoped>
 .chapter-sidebar {
   height: 100%; display: flex; flex-direction: column; min-height: 0;
+  overflow: hidden; /* 防止伸缩时内容被挤压形变 */
   .chapter-header {
     padding: 14px 16px; display: flex; align-items: center; gap: 10px; flex-shrink: 0;
     border-bottom: 1px solid #eee; background: #fff;
