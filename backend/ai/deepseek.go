@@ -1,6 +1,7 @@
 package ai
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -120,6 +121,99 @@ func (c *DeepSeekClient) Chat(messages []models.Message, temperature *float32) (
 		len([]rune(responseContent)), time.Since(start))
 
 	return responseContent, nil
+}
+
+// StreamChat 发送流式聊天请求，通过 onChunk 回调逐块返回内容增量
+// 返回完整累积文本，适合需要实时展示生成进度的场景
+func (c *DeepSeekClient) StreamChat(messages []models.Message, temperature *float32, onChunk func(string)) (string, error) {
+	req := models.AIRequest{
+		Model:    c.model,
+		Messages: messages,
+		Stream:   true,
+	}
+	if temperature != nil {
+		req.Temperature = temperature
+	}
+
+	body, err := json.Marshal(req)
+	if err != nil {
+		return "", fmt.Errorf("序列化请求失败: %w", err)
+	}
+
+	msgCount := len(messages)
+	totalChars := 0
+	for _, m := range messages {
+		totalChars += len([]rune(m.Content))
+	}
+	log.Printf("[AI] 流式请求 model=%s | endpoint=%s | 消息数=%d | 输入字符数=%d",
+		c.model, c.endpoint, msgCount, totalChars)
+
+	apiURL := c.apiURL()
+	httpReq, err := http.NewRequest("POST", apiURL, bytes.NewReader(body))
+	if err != nil {
+		return "", fmt.Errorf("创建请求失败: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
+	httpReq.Header.Set("Accept", "text/event-stream")
+
+	start := time.Now()
+	resp, err := c.client.Do(httpReq)
+	if err != nil {
+		return "", fmt.Errorf("API请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("API返回错误(%d): %s", resp.StatusCode, string(respBody))
+	}
+
+	var fullText strings.Builder
+	scanner := bufio.NewScanner(resp.Body)
+	// 使用大缓冲区处理长行
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		data := strings.TrimPrefix(line, "data: ")
+		data = strings.TrimSpace(data)
+		if data == "[DONE]" {
+			break
+		}
+
+		// 解析 OpenAI 兼容的 SSE 数据块
+		var chunk struct {
+			Choices []struct {
+				Delta struct {
+					Content string `json:"content"`
+				} `json:"delta"`
+			} `json:"choices"`
+		}
+		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			// 跳过无法解析的块（如纯文本非JSON行）
+			continue
+		}
+		if len(chunk.Choices) > 0 {
+			content := chunk.Choices[0].Delta.Content
+			if content != "" {
+				fullText.WriteString(content)
+				onChunk(content)
+			}
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		log.Printf("[AI] 流式读取错误: %v", err)
+		return fullText.String(), fmt.Errorf("读取流失败: %w", err)
+	}
+
+	log.Printf("[AI] 流式响应完成 | 输出字符数=%d | 耗时=%v",
+		len([]rune(fullText.String())), time.Since(start))
+	return fullText.String(), nil
 }
 
 // SplitChapters 使用AI拆分小说章节（AI仅标注行号范围，后端从原文切分）
@@ -299,7 +393,7 @@ func (c *DeepSeekClient) ExtractNovelInfo(chapters []models.Chapter, fullContent
 	return &extraction, nil
 }
 
-// ContinueWrite AI续写
+// ContinueWrite AI续写（非流式，一次性返回全部内容）
 func (c *DeepSeekClient) ContinueWrite(chapterContent, outline, requirement string) (string, error) {
 	var prompt string
 	if requirement != "" {
@@ -333,6 +427,42 @@ func (c *DeepSeekClient) ContinueWrite(chapterContent, outline, requirement stri
 	}
 
 	return c.Chat(messages, nil)
+}
+
+// ContinueWriteStream AI续写（流式，通过 onChunk 逐块返回内容）
+func (c *DeepSeekClient) ContinueWriteStream(chapterContent, outline, requirement string, onChunk func(string)) (string, error) {
+	var prompt string
+	if requirement != "" {
+		prompt = fmt.Sprintf(`你是一个专业的小说续写助手。
+
+当前章节内容：
+%s
+
+故事大纲：
+%s
+
+续写要求：
+%s
+
+请续写接下来的内容，保持风格一致，情节连贯。只返回续写的内容，不要包含任何解释。`, chapterContent, outline, requirement)
+	} else {
+		prompt = fmt.Sprintf(`你是一个专业的小说续写助手。
+
+当前章节内容：
+%s
+
+故事大纲：
+%s
+
+请自然地续写接下来的内容，保持风格一致，情节连贯。只返回续写的内容，不要包含任何解释。`, chapterContent, outline)
+	}
+
+	messages := []models.Message{
+		{Role: "system", Content: "你是一个专业的小说续写助手。请只返回续写的小说正文内容，不要包含任何解释或标注。"},
+		{Role: "user", Content: prompt},
+	}
+
+	return c.StreamChat(messages, nil, onChunk)
 }
 
 // Polish AI润色
@@ -415,6 +545,88 @@ func (c *DeepSeekClient) Expand(content string, isSelection bool, outline, requi
 	}
 
 	return c.Chat(messages, nil)
+}
+
+// PolishStream AI润色（流式，通过 onChunk 逐块返回内容）
+func (c *DeepSeekClient) PolishStream(content string, isSelection bool, outline, requirement string, onChunk func(string)) (string, error) {
+	scope := "整个章节"
+	if isSelection {
+		scope = "选中的内容"
+	}
+
+	var prompt string
+	if requirement != "" {
+		prompt = fmt.Sprintf(`你是一个专业的小说润色助手。请对以下%s进行润色改进。
+
+原始内容：
+%s
+
+故事大纲（供参考）：
+%s
+
+润色要求：
+%s
+
+请保持原意和风格，改进表达、语法和流畅度。只返回润色后的内容。`, scope, content, outline, requirement)
+	} else {
+		prompt = fmt.Sprintf(`你是一个专业的小说润色助手。请对以下%s进行润色改进。
+
+原始内容：
+%s
+
+故事大纲（供参考）：
+%s
+
+请保持原意和风格，改进表达、语法和流畅度。只返回润色后的内容。`, scope, content, outline)
+	}
+
+	messages := []models.Message{
+		{Role: "system", Content: "你是一个专业的小说润色助手。请只返回润色后的小说正文内容，不要包含任何解释或标注。"},
+		{Role: "user", Content: prompt},
+	}
+
+	return c.StreamChat(messages, nil, onChunk)
+}
+
+// ExpandStream AI扩写（流式，通过 onChunk 逐块返回内容）
+func (c *DeepSeekClient) ExpandStream(content string, isSelection bool, outline, requirement string, onChunk func(string)) (string, error) {
+	scope := "整个章节"
+	if isSelection {
+		scope = "选中的内容"
+	}
+
+	var prompt string
+	if requirement != "" {
+		prompt = fmt.Sprintf(`你是一个专业的小说扩写助手。请对以下%s进行扩写，丰富细节和描写。
+
+原始内容：
+%s
+
+故事大纲（供参考）：
+%s
+
+扩写要求：
+%s
+
+请丰富细节、描写、对话和心理活动等，使内容更加生动充实。只返回扩写后的内容。`, scope, content, outline, requirement)
+	} else {
+		prompt = fmt.Sprintf(`你是一个专业的小说扩写助手。请对以下%s进行扩写，丰富细节和描写。
+
+原始内容：
+%s
+
+故事大纲（供参考）：
+%s
+
+请丰富细节、描写、对话和心理活动等，使内容更加生动充实。只返回扩写后的内容。`, scope, content, outline)
+	}
+
+	messages := []models.Message{
+		{Role: "system", Content: "你是一个专业的小说扩写助手。请只返回扩写后的小说正文内容，不要包含任何解释或标注。"},
+		{Role: "user", Content: prompt},
+	}
+
+	return c.StreamChat(messages, nil, onChunk)
 }
 
 // CheckConnection 检查API连接是否正常

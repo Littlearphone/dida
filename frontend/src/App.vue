@@ -52,7 +52,12 @@ html, body, #app {
     }
     &:hover, &:hover * { color: #fff; opacity: 1 !important; }
   }
-  .n-card-content { padding: 20px 24px !important; }
+  .n-card-content { padding: 20px 24px !important; flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .n-card-content > div { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .n-form-item--top-labelled.n-form-item--top-labelled { grid-template-rows: auto 1fr auto; }
+  .n-form-item-blank { align-items: stretch; min-height: 0; height: 100%; }
+  .n-input--textarea { height: 100% !important; }
+  .n-input--resizable textarea { resize: none !important; }
   .n-card__footer { padding: 0 !important; border-top: 1px solid #eee;
     .n-space { width: 100%; gap: 1px !important; flex-flow: nowrap !important; & > div { width: 100%; } }
     .n-space-item { flex: 1; display: flex; }

@@ -29,7 +29,7 @@ async function handleDelete() {
 </script>
 
 <template>
-  <n-modal class="dialog-modal" :show="show" title="删除小说" preset="card" style="width: 360px" :mask-closable="false"
+  <n-modal class="dialog-modal" :show="show" title="删除小说" preset="card" style="width: 360px" :mask-closable="false" draggable
     @update:show="emit('update:show', $event)">
     <n-text>确定删除《{{ novel?.title }}》吗？此操作将删除所有章节且不可撤销。</n-text>
     <template #footer>

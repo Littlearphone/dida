@@ -36,7 +36,7 @@ async function handleSave() {
 </script>
 
 <template>
-  <n-modal class="dialog-modal" :show="show" title="修改简介" preset="card" style="width: 480px" :mask-closable="false"
+  <n-modal class="dialog-modal" :show="show" title="修改简介" preset="card" style="width: 480px" :mask-closable="false" draggable
     @update:show="emit('update:show', $event)">
     <n-form label-placement="top">
       <n-form-item label="小说简介">

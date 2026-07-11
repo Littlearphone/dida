@@ -54,8 +54,8 @@ async function saveAISetup() {
 </script>
 
 <template>
-  <n-modal class="dialog-modal" :show="show" title="配置 AI 提供商" preset="card" style="width: 480px"
-    :mask-closable="false" @update:show="emit('update:show', $event)">
+  <n-modal class="dialog-modal" :show="show" title="配置 AI 提供商" preset="card" style="width: 80vw"
+    :mask-closable="false" draggable @update:show="emit('update:show', $event)">
     <n-alert type="info" :bordered="false" style="margin-bottom: 12px">
       需要配置 AI 接口才能使用智能续写、润色等功能。目前支持 DeepSeek 兼容接口。
     </n-alert>

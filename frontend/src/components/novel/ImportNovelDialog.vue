@@ -129,7 +129,7 @@ const aiConfigured = () => settingsStore.settings?.aiConfigured ?? false
 </script>
 
 <template>
-  <n-modal class="dialog-modal" :show="show" title="导入小说" preset="card" style="width: 600px" :mask-closable="false"
+  <n-modal class="dialog-modal" :show="show" title="导入小说" preset="card" style="width: 600px" :mask-closable="false" draggable
     @update:show="emit('update:show', $event)" @after-leave="resetImport">
     <div v-if="!showSplitPreview">
       <n-form label-placement="top">

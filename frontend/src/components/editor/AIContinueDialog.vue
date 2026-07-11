@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { ref, inject } from 'vue'
-import { NModal, NAlert, NForm, NFormItem, NInput, NButton, NScrollbar, NSpace, NIcon, NText, useMessage } from 'naive-ui'
-import { CopyOutline as CopyIcon } from '@vicons/ionicons5'
+import { ref, inject, onUnmounted } from 'vue'
+import { NModal, NAlert, NForm, NFormItem, NInput, NButton, NSpace, NIcon, NProgress, useMessage } from 'naive-ui'
+import { CopyOutline as CopyIcon, ArrowDownOutline as InsertIcon, AddCircleOutline as NewChapterIcon } from '@vicons/ionicons5'
 import { useNovelStore } from '../../stores/novel'
 import * as aiApi from '../../api/ai'
-import { EDITOR_ACTIONS_KEY, type EditorActions } from '../../types/editor'
+import { EDITOR_ACTIONS_KEY } from '../../types/editor'
 
 defineProps<{ show: boolean }>()
 const emit = defineEmits<{ 'update:show': [value: boolean] }>()
@@ -17,22 +17,98 @@ const continueRequirement = ref('')
 const continueLoading = ref(false)
 const continueResult = ref('')
 const showContinueResult = ref(false)
+const generateProgress = ref(0) // 模拟进度 0-100
+const generateStatus = ref('') // 当前状态文字
+// 用于取消流式请求的 AbortController
+let abortController: AbortController | null = null
+
+/** 模拟进度的定时器，让进度条平滑递增到 90% */
+let progressTimer: ReturnType<typeof setInterval> | null = null
+function startProgressSimulation() {
+  generateProgress.value = 0
+  generateStatus.value = '正在准备续写请求...'
+  progressTimer = setInterval(() => {
+    // 进度越接近 90% 增长越慢（模拟真实等待体验）
+    const remaining = 90 - generateProgress.value
+    if (remaining > 0) {
+      generateProgress.value += Math.max(0.5, remaining * 0.08)
+    }
+    // 根据进度更新状态文字
+    if (generateProgress.value < 20) {
+      generateStatus.value = '正在准备续写请求...'
+    } else if (generateProgress.value < 50) {
+      generateStatus.value = '正在请求 AI 服务...'
+    } else {
+      generateStatus.value = 'AI 正在生成内容...'
+    }
+  }, 200)
+}
+function stopProgressSimulation() {
+  if (progressTimer) {
+    clearInterval(progressTimer)
+    progressTimer = null
+  }
+}
 
 async function handleContinueWrite() {
   if (!novelStore.currentChapter) return
   continueLoading.value = true
+  continueResult.value = ''
+  showContinueResult.value = true
+
+  // 创建 AbortController 用于取消请求
+  abortController = new AbortController()
+  startProgressSimulation()
+
   try {
-    const res = await aiApi.continueWrite({
-      chapterContent: novelStore.currentChapter.content,
-      outline: novelStore.currentNovel?.outline || '',
-      requirement: continueRequirement.value,
-    })
-    continueResult.value = res.result
-    showContinueResult.value = true
+    // 流式续写：onChunk 回调实时更新内容和进度
+    const fullText = await aiApi.continueWrite(
+      {
+        chapterContent: novelStore.currentChapter.content,
+        outline: novelStore.currentNovel?.outline || '',
+        requirement: continueRequirement.value,
+      },
+      (fullText: string) => {
+        // 更新显示内容
+        continueResult.value = fullText
+        // 有内容到达说明 AI 正在生成，进度快进到 95%
+        if (generateProgress.value < 95) {
+          generateProgress.value = Math.max(generateProgress.value, 70)
+          generateStatus.value = 'AI 正在生成内容...'
+        }
+      },
+      abortController.signal,
+    )
+    // 流完成，内容已累积完毕
+    continueResult.value = fullText
+    generateProgress.value = 100
+    generateStatus.value = '续写完成'
+    stopProgressSimulation()
   } catch (e: any) {
+    stopProgressSimulation()
+    // 用户取消不报错
+    if (e.name === 'AbortError') {
+      message.info('已取消续写')
+      closeDialog()
+      return
+    }
     message.error(`续写失败: ${e.message}`)
+    // 如果已经有部分内容，保留以便用户复制
+    if (!continueResult.value) {
+      showContinueResult.value = false
+    } else {
+      generateProgress.value = 100
+      generateStatus.value = '续写出错（已保留部分内容）'
+    }
   } finally {
     continueLoading.value = false
+    abortController = null
+  }
+}
+
+function cancelContinue() {
+  if (abortController) {
+    abortController.abort()
   }
 }
 
@@ -63,44 +139,77 @@ function copyResult() {
 }
 
 function closeDialog() {
+  // 如果正在加载，取消请求
+  if (continueLoading.value) {
+    cancelContinue()
+  }
+  stopProgressSimulation()
+  abortController = null
   emit('update:show', false)
   continueRequirement.value = ''
   continueResult.value = ''
   showContinueResult.value = false
+  generateProgress.value = 0
+  generateStatus.value = ''
 }
+
+onUnmounted(() => {
+  stopProgressSimulation()
+  if (abortController) abortController.abort()
+})
 </script>
 
 <template>
-  <n-modal class="dialog-modal" :show="show" title="AI 续写" preset="card" style="width: 500px"
-    :mask-closable="false" @update:show="emit('update:show', $event)">
-    <div v-if="!showContinueResult">
-      <n-form label-placement="top">
-        <n-form-item label="续写要求（可选）">
+  <n-modal class="dialog-modal" :show="show" title="AI 续写" preset="card" style="width: 80vw; height: 80vh;"
+    :mask-closable="false" draggable @update:show="emit('update:show', $event)">
+    <!-- 输入阶段：填写续写要求 -->
+    <div v-if="!showContinueResult" style="display: flex; flex-direction: column; flex: 1; min-height: 0;">
+      <n-form label-placement="top" style="display: flex; flex-direction: column; flex: 1; min-height: 0;">
+        <n-form-item label="续写要求（可选）" style="flex: 1; align-items: flex-start;">
           <n-input v-model:value="continueRequirement" type="textarea"
-            placeholder="输入对续写内容的要求、方向或风格..." :rows="4" />
+            placeholder="输入对续写内容的要求、方向或风格..." :resizable="false" :maxlength="500" show-count
+            style="height: 100%; min-height: 80px;" />
         </n-form-item>
       </n-form>
     </div>
-    <div v-else>
-      <n-alert type="success" :bordered="false" style="margin-bottom: 12px">
+    <!-- 结果阶段 -->
+    <div v-else style="display: flex; flex-direction: column; flex: 1; min-height: 0;">
+      <n-alert type="success" :bordered="false" style="flex-shrink: 0; margin-bottom: 12px">
         续写完成，共 {{ continueResult.length }} 字
       </n-alert>
-      <n-scrollbar style="max-height: 300px; border: 1px solid #eee; border-radius: 4px; padding: 12px;">
-        <n-text>{{ continueResult }}</n-text>
-      </n-scrollbar>
+      <!-- 生成进度条 -->
+      <div v-if="continueLoading" style="flex-shrink: 0; margin-bottom: 12px;">
+        <n-progress type="line" :percentage="Math.round(generateProgress)" :indicator-placement="'inside'"
+          :height="20" :border-radius="4" processing>
+          {{ generateStatus }}
+        </n-progress>
+      </div>
+      <!-- 预览区域：flex:1 自适应填满剩余空间，保留换行 -->
+      <div style="flex: 1; min-height: 0; overflow-y: auto; border: 1px solid #e0e0e0; border-radius: 6px; background: #fafafa;">
+        <div style="padding: 20px; white-space: pre-wrap; line-height: 1.8; font-size: 15px; color: #333;">
+          {{ continueResult || (continueLoading ? '等待 AI 响应...' : '') }}
+        </div>
+      </div>
     </div>
     <template #footer>
       <n-space justify="end">
         <template v-if="!showContinueResult">
           <n-button quaternary @click="closeDialog">取消</n-button>
-          <n-button type="primary" :loading="continueLoading" @click="handleContinueWrite">开始续写</n-button>
+          <n-button type="primary" :loading="continueLoading" :disabled="continueLoading" @click="handleContinueWrite">开始续写</n-button>
+        </template>
+        <template v-else-if="continueLoading">
+          <n-button quaternary @click="cancelContinue">取消生成</n-button>
         </template>
         <template v-else>
           <n-button quaternary @click="copyResult">
             <template #icon><n-icon><CopyIcon/></n-icon></template>复制
           </n-button>
-          <n-button quaternary @click="insertToChapterEnd">插入当前章节末尾</n-button>
-          <n-button type="primary" @click="insertAsNewChapter">新建章节</n-button>
+          <n-button quaternary @click="insertToChapterEnd">
+            <template #icon><n-icon><InsertIcon/></n-icon></template>插入当前章节末尾
+          </n-button>
+          <n-button type="primary" @click="insertAsNewChapter">
+            <template #icon><n-icon><NewChapterIcon/></n-icon></template>新建章节
+          </n-button>
         </template>
       </n-space>
     </template>

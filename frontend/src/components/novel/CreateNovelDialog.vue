@@ -33,8 +33,7 @@ async function handleCreate() {
 </script>
 
 <template>
-  <n-modal class="dialog-modal" :show="show" title="创建新小说" preset="card" style="width: 420px" :mask-closable="false"
-    @update:show="emit('update:show', $event)"
+  <n-modal class="dialog-modal" :show="show" title="创建新小说" preset="card" style="width: 420px" :mask-closable="false" draggable @update:show="emit('update:show', $event)"
     @after-leave="() => { newTitle = ''; newAuthor = '' }">
     <n-form label-placement="top">
       <n-form-item label="小说标题" required>
