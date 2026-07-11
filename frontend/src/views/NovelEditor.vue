@@ -14,6 +14,7 @@ import AIEditDialog from '../components/editor/AIEditDialog.vue'
 import AISetupDialog from '../components/editor/AISetupDialog.vue'
 import { EditorContent, useEditor } from '@tiptap/vue-3'
 import { Plugin, PluginKey } from '@tiptap/pm/state'
+import { createDocument } from '@tiptap/core'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import StarterKit from '@tiptap/starter-kit'
 import { NLayout, NText, NInput, NButton, NIcon, useMessage } from 'naive-ui'
@@ -99,9 +100,10 @@ function setEditorContent(text: string) {
   editor.value?.commands.setContent(toTiptapHtml(text))
 }
 
-// === 切换章节时同步编辑器 ===
+// === 切换章节时同步编辑器（初始化时不执行） ===
+const isInitializing = ref(true)
 watch(currentChapter, (ch) => {
-  if (ch && editor.value) {
+  if (ch && editor.value && !isInitializing.value) {
     editor.value.commands.setContent(toTiptapHtml(ch.content))
     editContent.value = ch.content
     contentChanged.value = false
@@ -135,6 +137,7 @@ function formatContent() {
 
 // === 搜索 / 替换（ProseMirror Decoration 高亮） ===
 const showSearch = ref(false)
+const showReplace = ref(false)
 const searchQuery = ref('')
 const replaceText = ref('')
 const currentMatchIndex = ref(0)
@@ -279,6 +282,7 @@ function replaceAll() {
 /** 关闭搜索 */
 function closeSearch() {
   showSearch.value = false
+  showReplace.value = false
   searchQuery.value = ''
   replaceText.value = ''
   clearSearchHighlights()
@@ -289,12 +293,22 @@ function closeSearch() {
 function handleKeydown(e: KeyboardEvent) {
   const isCtrl = e.ctrlKey || e.metaKey
 
-  // Ctrl+F：切换搜索
+  // Ctrl+F：打开搜索+替换；已打开则关闭
   if (isCtrl && e.key === 'f' && !e.shiftKey) {
     e.preventDefault()
     if (showSearch.value) { closeSearch(); return }
     showSearch.value = true
+    showReplace.value = true
     nextTick(() => (document.querySelector('.search-input input') as HTMLInputElement)?.focus())
+    return
+  }
+
+  // Ctrl+H：打开搜索 + 替换栏
+  if (isCtrl && e.key === 'h') {
+    e.preventDefault()
+    showSearch.value = true
+    showReplace.value = true
+    nextTick(() => (document.querySelector('.replace-input input') as HTMLInputElement)?.focus())
     return
   }
 
@@ -330,12 +344,6 @@ function handleKeydown(e: KeyboardEvent) {
 
   // Escape：关闭搜索
   if (e.key === 'Escape') { closeSearch(); e.preventDefault(); return }
-
-  // Ctrl+H：聚焦替换输入框
-  if (isCtrl && e.key === 'h') {
-    e.preventDefault()
-    nextTick(() => (document.querySelector('.replace-input input') as HTMLInputElement)?.focus())
-  }
 }
 
 // === 窄窗口自动收起侧边栏 ===
@@ -373,7 +381,16 @@ onMounted(async () => {
     if (novelStore.chapters.length > 0) {
       novelStore.selectChapter(novelStore.chapters[0])
       await nextTick()
-      editor.value?.commands.setContent(toTiptapHtml(novelStore.chapters[0].content))
+      // 用 addToHistory=false 的 transaction 设内容，避免产生 undo 记录
+      const { state, view, schema } = editor.value!
+      const html = toTiptapHtml(novelStore.chapters[0].content)
+      const doc = createDocument(html, schema)
+      const tr = state.tr.replaceWith(0, state.doc.content.size, doc)
+      tr.setMeta('addToHistory', false)
+      view.dispatch(tr)
+      editContent.value = novelStore.chapters[0].content
+      contentChanged.value = false
+      hasUserEdited.value = false
     }
   }
   searchPlugin = createSearchPluginInst()
@@ -381,6 +398,7 @@ onMounted(async () => {
   document.addEventListener('keydown', handleKeydown)
   window.addEventListener('resize', handleWindowResize)
   startPolling()
+  isInitializing.value = false
 })
 
 onUnmounted(() => {
@@ -414,7 +432,7 @@ onUnmounted(() => {
         @update:showSearch="showSearch = $event"
         @formatContent="formatContent" @save="doSave" />
 
-      <!-- 独立搜索栏：居中，与编辑器内容对齐 -->
+      <!-- 搜索 / 替换栏 -->
       <div v-if="showSearch" class="search-bar">
         <div class="search-bar-inner">
           <div class="search-row">
@@ -432,8 +450,11 @@ onUnmounted(() => {
             </n-button>
             <n-text v-if="totalMatches > 0" class="match-counter">{{ currentMatchIndex }}/{{ totalMatches }}</n-text>
             <n-text v-else depth="3" class="match-counter">无结果</n-text>
+            <n-button quaternary size="tiny" class="search-close" @click="closeSearch" title="关闭搜索 (Esc)">
+              <template #icon><n-icon size="14"><CloseIcon/></n-icon></template>
+            </n-button>
           </div>
-          <div class="search-row">
+          <div v-if="showReplace" class="search-row">
             <n-input :value="replaceText" placeholder="替换为..." size="small"
               class="replace-input" style="width:220px"
               @update:value="(v: string) => replaceText = v" />
@@ -442,9 +463,6 @@ onUnmounted(() => {
             </n-button>
             <n-button size="tiny" :disabled="totalMatches === 0 || !replaceText" @click="replaceAll">
               全部替换
-            </n-button>
-            <n-button quaternary size="tiny" class="search-close" @click="closeSearch" title="关闭搜索 (Esc)">
-              <template #icon><n-icon size="14"><CloseIcon/></n-icon></template>
             </n-button>
           </div>
         </div>
@@ -490,6 +508,7 @@ onUnmounted(() => {
 .search-bar-inner {
   max-width: 960px;
   width: 100%;
+  padding: 0 64px; /* 与编辑器正文对齐 */
   display: flex; flex-direction: column; gap: 6px;
 }
 .search-row {
