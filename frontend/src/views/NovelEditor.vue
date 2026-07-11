@@ -534,6 +534,8 @@ onUnmounted(() => {
   background: #fff; outline: none;
   white-space: pre-wrap; box-sizing: border-box;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+  /* 使用 flex 让 .ProseMirror 撑满空白区域，而非仅内容高度 */
+  display: flex; flex-direction: column;
 }
 .content-editable:focus,
 .content-editable:focus-visible,
@@ -570,5 +572,6 @@ onUnmounted(() => {
   outline: none !important;
   border: none !important;
   box-shadow: none !important;
+  flex: 1; /* 撑满 .content-editable 剩余空间，使空白区域可点击编辑 */
 }
 </style>
