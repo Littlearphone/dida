@@ -546,6 +546,7 @@ onUnmounted(() => {
   white-space: pre-wrap; box-sizing: border-box;
   position: relative; /* 四角标记定位锚点 */
   flex: 1; /* 撑满 .editor-page 剩余空间 */
+  display: flex; flex-direction: column; /* 让 .ProseMirror 撑满可点击区域 */
 }
 .content-editable:focus,
 .content-editable:focus-visible,
@@ -617,5 +618,6 @@ onUnmounted(() => {
   outline: none !important;
   border: none !important;
   box-shadow: none !important;
+  flex: 1; /* 撑满 .content-editable，使整页可点击编辑 */
 }
 </style>
