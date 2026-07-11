@@ -60,6 +60,26 @@ provide(EDITOR_ACTIONS_KEY, {
   setContent: (html: string) => setEditorContent(html),
   getContent: () => editContent.value,
   markChanged: () => { contentChanged.value = true },
+  getSelectionText: () => {
+    if (!editor.value) return ''
+    const { from, to } = editor.value.state.selection
+    if (from === to) return ''
+    return editor.value.state.doc.textBetween(from, to)
+  },
+  replaceSelection: (text: string) => {
+    if (!editor.value) return
+    const { from, to } = editor.value.state.selection
+    if (from === to) {
+      // 无选区时追加到末尾
+      editor.value.commands.insertContentAt(editor.value.state.doc.content.size, text)
+    } else {
+      editor.value.chain().focus().command(({ tr }) => {
+        tr.replaceWith(from, to, editor.value!.schema.text(text))
+        return true
+      }).run()
+    }
+    contentChanged.value = true
+  },
 })
 
 // === 外观 ===
@@ -364,12 +384,10 @@ const showContinueWrite = ref(false)
 const showAIEdit = ref(false)
 const showAISetup = ref(false)
 const aiEditMode = ref<'polish' | 'expand'>('polish')
-const aiEditScope = ref<'selection' | 'chapter'>('chapter')
 const aiConfigured = computed(() => settingsStore.settings?.aiConfigured ?? false)
 
-function openAIEdit(mode: 'polish' | 'expand', scope: 'selection' | 'chapter') {
+function openAIEdit(mode: 'polish' | 'expand') {
   aiEditMode.value = mode
-  aiEditScope.value = scope
   showAIEdit.value = true
 }
 
@@ -486,13 +504,13 @@ onUnmounted(() => {
       <EditorStatusBar
         :wordCount="wordCount" :aiConfigured="aiConfigured"
         @continue="showContinueWrite = true"
-        @polish="(s) => openAIEdit('polish', s)"
-        @expand="(s) => openAIEdit('expand', s)"
+        @polish="openAIEdit('polish')"
+        @expand="openAIEdit('expand')"
         @setupAI="showAISetup = true" />
     </div>
 
     <AIContinueDialog v-model:show="showContinueWrite" />
-    <AIEditDialog v-model:show="showAIEdit" :mode="aiEditMode" :scope="aiEditScope" />
+    <AIEditDialog v-model:show="showAIEdit" :mode="aiEditMode" />
     <AISetupDialog v-model:show="showAISetup" />
   </n-layout>
 </template>

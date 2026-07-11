@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, inject, onUnmounted } from 'vue'
+import { ref, inject, watch, onUnmounted } from 'vue'
 import {
   NModal, NAlert, NForm, NFormItem, NInput, NButton, NGrid, NGi,
   NSpace, NIcon, NProgress, useMessage,
@@ -12,7 +12,6 @@ import { EDITOR_ACTIONS_KEY } from '../../types/editor'
 const props = defineProps<{
   show: boolean
   mode: 'polish' | 'expand'
-  scope: 'selection' | 'chapter'
 }>()
 const emit = defineEmits<{ 'update:show': [value: boolean] }>()
 
@@ -28,11 +27,22 @@ const showResult = ref(false)
 const progress = ref(0)
 const progressText = ref('')
 
+/** 自动检测：有选中文本就用选中，否则整章 */
+const hasSelection = ref(false)
+/** 弹框打开时保存的选中文本 */
+const savedSelectionText = ref('')
+
 let abortController: AbortController | null = null
 let progressTimer: ReturnType<typeof setInterval> | null = null
 
 const title = props.mode === 'polish' ? 'AI 润色' : 'AI 扩写'
 const resultLabel = props.mode === 'polish' ? '润色后' : '扩写后'
+
+// 弹框打开时通过编辑器保存选中文本（基于 ProseMirror 选区，不受焦点影响）
+function checkSelection() {
+  savedSelectionText.value = editorActions.getSelectionText?.()?.trim() || ''
+  hasSelection.value = !!savedSelectionText.value
+}
 
 function startProgressSimulation() {
   progress.value = 0
@@ -60,8 +70,9 @@ function stopProgressSimulation() {
 
 async function handleEdit() {
   loading.value = true
-  originalContent.value = props.scope === 'selection'
-    ? (window.getSelection()?.toString() || '')
+  // 使用弹框打开时保存的选中文本，或整章内容
+  originalContent.value = savedSelectionText.value
+    ? savedSelectionText.value
     : (editorActions.getContent() || novelStore.currentChapter?.content || '')
 
   editResult.value = ''
@@ -75,7 +86,7 @@ async function handleEdit() {
     const fullText = await apiFn(
       {
         content: originalContent.value,
-        isSelection: props.scope === 'selection',
+        isSelection: !!savedSelectionText.value,
         outline: novelStore.currentNovel?.outline || '',
         requirement: requirement.value,
       },
@@ -120,13 +131,11 @@ function cancelEdit() {
 
 function replaceContent() {
   if (!editResult.value) return
-  if (props.scope === 'selection') {
-    const sel = window.getSelection()
-    if (sel?.rangeCount) {
-      sel.getRangeAt(0).deleteContents()
-      sel.getRangeAt(0).insertNode(document.createTextNode(editResult.value))
-    }
+  if (savedSelectionText.value && editorActions.replaceSelection) {
+    // 有选中 → 通过编辑器替换选区
+    editorActions.replaceSelection(editResult.value)
   } else {
+    // 整章 → 替换全部
     editorActions.setContent(editResult.value)
   }
   message.success('已替换原文')
@@ -149,9 +158,16 @@ function closeDialog() {
   editResult.value = ''
   originalContent.value = ''
   showResult.value = false
+  hasSelection.value = false
+  savedSelectionText.value = ''
   progress.value = 0
   progressText.value = ''
 }
+
+// 弹框打开时检测选中状态
+watch(() => props.show, (open) => {
+  if (open) checkSelection()
+})
 
 onUnmounted(() => {
   stopProgressSimulation()
@@ -162,22 +178,27 @@ onUnmounted(() => {
 <template>
   <n-modal class="dialog-modal" :show="show" :title="title" preset="card" style="width: 80vw; height: 80vh;"
     :mask-closable="false" draggable @update:show="emit('update:show', $event)">
-    <!-- 提示：选中内容模式 -->
-    <div v-if="scope === 'selection' && !showResult" style="margin-bottom: 12px">
-      <n-alert type="info" :bordered="false">当前选中内容将被{{ mode === 'polish' ? '润色' : '扩写' }}</n-alert>
+    <!-- 输入阶段：包裹在 div 中以匹配全局 CSS ".n-card-content > div" -->
+    <div v-if="!showResult" style="display: flex; flex-direction: column; flex: 1; min-height: 0;">
+      <!-- 有选中时显示提示和选中内容预览 -->
+      <div v-if="hasSelection" style="flex-shrink: 0; margin-bottom: 12px">
+        <n-alert type="info" :bordered="false" style="line-height: 1.6;">
+          <div style="font-weight: 500; margin-bottom: 6px;">当前选中内容将被{{ mode === 'polish' ? '润色' : '扩写' }}</div>
+          <div style="font-size: 12px; color: #666; white-space: pre-wrap; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;">
+            {{ savedSelectionText }}
+          </div>
+        </n-alert>
+      </div>
+      <n-form label-placement="top" style="display: flex; flex-direction: column; flex: 1; min-height: 0;">
+        <n-form-item :label="`${mode === 'polish' ? '润色' : '扩写'}要求（可选）`" style="flex: 1; align-items: flex-start;">
+          <n-input v-model:value="requirement" type="textarea"
+            :placeholder="`输入${mode === 'polish' ? '润色' : '扩写'}方向、风格要求...`" :resizable="false" :maxlength="500" show-count
+            style="height: 100%; min-height: 80px;" />
+        </n-form-item>
+      </n-form>
     </div>
 
-    <!-- 输入阶段 -->
-    <n-form v-if="!showResult" label-placement="top"
-      style="display: flex; flex-direction: column; flex: 1; min-height: 0;">
-      <n-form-item :label="`${mode === 'polish' ? '润色' : '扩写'}要求（可选）`" style="flex: 1; align-items: flex-start;">
-        <n-input v-model:value="requirement" type="textarea"
-          :placeholder="`输入${mode === 'polish' ? '润色' : '扩写'}方向、风格要求...`" :resizable="false" :maxlength="500" show-count
-          style="height: 100%; min-height: 80px;" />
-      </n-form-item>
-    </n-form>
-
-    <!-- 结果阶段：flex 自适应高度 -->
+    <!-- 结果阶段：有选中时双栏，无选中时单栏（同续写） -->
     <div v-if="showResult" style="display: flex; flex-direction: column; flex: 1; min-height: 0;">
       <!-- 进度条 -->
       <div v-if="loading" style="flex-shrink: 0; margin-bottom: 12px;">
@@ -187,10 +208,10 @@ onUnmounted(() => {
         </n-progress>
       </div>
 
-      <n-grid :cols="2" :x-gap="12" style="flex: 1; min-height: 0;">
+      <!-- 有选中文本时：双栏对比 -->
+      <n-grid v-if="hasSelection" :cols="2" :x-gap="12" style="flex: 1; min-height: 0;">
         <n-gi style="display: flex; flex-direction: column; min-height: 0;">
           <n-alert type="info" :bordered="false" style="flex-shrink: 0; margin-bottom: 8px;">原文</n-alert>
-          <!-- 原文预览：flex:1 自适应 -->
           <div style="flex: 1; min-height: 0; overflow-y: auto; border: 1px solid #e0e0e0; border-radius: 6px; background: #fafafa;">
             <div style="padding: 16px; white-space: pre-wrap; line-height: 1.8; font-size: 14px; color: #666;">
               {{ originalContent }}
@@ -199,17 +220,20 @@ onUnmounted(() => {
         </n-gi>
         <n-gi style="display: flex; flex-direction: column; min-height: 0;">
           <n-alert type="success" :bordered="false" style="flex-shrink: 0; margin-bottom: 8px;">{{ resultLabel }}</n-alert>
-          <!-- 结果预览（可编辑）：flex:1 自适应 -->
           <div style="flex: 1; min-height: 0; overflow-y: auto; border: 1px solid #2080f0; border-radius: 6px; background: #fafafa;">
-            <div
-              contenteditable="true"
-              @input="editResult = ($event.target as HTMLElement).innerText"
-              style="padding: 16px; white-space: pre-wrap; line-height: 1.8; font-size: 14px; outline: none; font-family: inherit; color: #333; min-height: 80px;">
+            <div style="padding: 16px; white-space: pre-wrap; line-height: 1.8; font-size: 14px; color: #333; min-height: 80px;">
               {{ editResult || (loading ? '等待 AI 响应...' : '') }}
             </div>
           </div>
         </n-gi>
       </n-grid>
+
+      <!-- 无选中文本时：单栏预览（同续写） -->
+      <div v-else style="flex: 1; min-height: 0; overflow-y: auto; border: 1px solid #2080f0; border-radius: 6px; background: #fafafa;">
+        <div style="padding: 20px; white-space: pre-wrap; line-height: 1.8; font-size: 15px; color: #333; min-height: 80px;">
+          {{ editResult || (loading ? '等待 AI 响应...' : '') }}
+        </div>
+      </div>
     </div>
 
     <template #footer>
@@ -238,3 +262,13 @@ onUnmounted(() => {
     </template>
   </n-modal>
 </template>
+
+<style scoped>
+/* 确保卡片的 content 区是 flex 容器，使子元素 flex:1 生效 */
+:deep(.n-card > div:nth-child(2)) {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+</style>
