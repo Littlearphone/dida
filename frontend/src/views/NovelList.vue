@@ -9,7 +9,7 @@ import type { SplitResult, Novel } from '../types'
 import {
   NButton, NCard, NModal, NInput, NForm, NFormItem, NIcon, NText,
   NEmpty, NSpace, NGrid, NGi, NDivider, NUpload, useMessage, NAlert,
-  NSpin, NScrollbar, useDialog,
+  NSpin, NScrollbar,
 } from 'naive-ui'
 import { AddOutline as AddIcon, DocumentTextOutline as ImportIcon } from '@vicons/ionicons5'
 
@@ -17,7 +17,6 @@ const router = useRouter()
 const novelStore = useNovelStore()
 const settingsStore = useSettingsStore()
 const message = useMessage()
-const dialog = useDialog()
 
 // === 创建小说弹框 ===
 const showCreateModal = ref(false)
@@ -183,20 +182,25 @@ function resetImport() {
 }
 
 // === 删除小说 ===
+const showDeleteNovelModal = ref(false)
+const deleteNovelTarget = ref<Novel | null>(null)
+const deletingNovel = ref(false)
+
 function confirmDeleteNovel(novel: Novel) {
-  const d = dialog.warning({
-    title: '删除小说',
-    content: `确定删除《${novel.title}》吗？\n该操作将删除所有章节且不可撤销。`,
-    positiveText: '删除',
-    negativeText: '取消',
-    onPositiveClick: () => {
-      d.loading = true
-      novelStore.deleteNovel(novel.id).then((ok) => {
-        if (ok) message.success('已删除')
-        else message.error('删除失败')
-      })
-    },
-  })
+  deleteNovelTarget.value = novel
+  showDeleteNovelModal.value = true
+}
+
+async function handleDeleteNovelConfirm() {
+  const novel = deleteNovelTarget.value
+  if (!novel) return
+  deletingNovel.value = true
+  const ok = await novelStore.deleteNovel(novel.id)
+  deletingNovel.value = false
+  if (ok) message.success('已删除')
+  else message.error('删除失败')
+  showDeleteNovelModal.value = false
+  deleteNovelTarget.value = null
 }
 
 // === 重命名小说 ===
@@ -331,7 +335,7 @@ function checkAIConfig(): boolean {
       </n-form>
       <template #footer>
         <n-space justify="end">
-          <n-button @click="showCreateModal = false">取消</n-button>
+          <n-button quaternary @click="showCreateModal = false">取消</n-button>
           <n-button type="primary" :loading="creating" @click="handleCreate">创建</n-button>
         </n-space>
       </template>
@@ -383,12 +387,12 @@ function checkAIConfig(): boolean {
       <template #footer>
         <n-space justify="end">
           <template v-if="!showSplitPreview">
-            <n-button @click="showImportModal = false; resetImport()" :disabled="importing">取消</n-button>
-            <n-button :disabled="importing" :loading="importing" @click="handleManualImport">直接导入</n-button>
+            <n-button quaternary @click="showImportModal = false; resetImport()" :disabled="importing">取消</n-button>
+            <n-button quaternary :disabled="importing" :loading="importing" @click="handleManualImport">直接导入</n-button>
             <n-button v-if="checkAIConfig()" :disabled="importing" type="primary" :loading="importing" @click="handleAISplit">AI智能拆分</n-button>
           </template>
           <template v-else>
-            <n-button @click="showSplitPreview = false" :disabled="importing">返回修改</n-button>
+            <n-button quaternary @click="showSplitPreview = false" :disabled="importing">返回修改</n-button>
             <n-button type="primary" :disabled="importing" :loading="importing" @click="confirmImport">确认导入</n-button>
           </template>
         </n-space>
@@ -404,7 +408,7 @@ function checkAIConfig(): boolean {
       </n-form>
       <template #footer>
         <n-space justify="end">
-          <n-button @click="showRenameNovelModal = false">取消</n-button>
+          <n-button quaternary @click="showRenameNovelModal = false">取消</n-button>
           <n-button type="primary" @click="saveRenameNovel">保存</n-button>
         </n-space>
       </template>
@@ -419,8 +423,19 @@ function checkAIConfig(): boolean {
       </n-form>
       <template #footer>
         <n-space justify="end">
-          <n-button @click="showEditDescModal = false">取消</n-button>
+          <n-button quaternary @click="showEditDescModal = false">取消</n-button>
           <n-button type="primary" @click="saveEditDesc">保存</n-button>
+        </n-space>
+      </template>
+    </n-modal>
+
+    <!-- 删除小说确认弹框 -->
+    <n-modal class="dialog-modal" :show="showDeleteNovelModal" title="删除小说" preset="card" style="width: 360px" :mask-closable="false" @update:show="showDeleteNovelModal = $event">
+      <n-text>确定删除《{{ deleteNovelTarget?.title }}》吗？此操作将删除所有章节且不可撤销。</n-text>
+      <template #footer>
+        <n-space justify="end">
+          <n-button quaternary @click="showDeleteNovelModal = false">取消</n-button>
+          <n-button type="error" :loading="deletingNovel" @click="handleDeleteNovelConfirm">删除</n-button>
         </n-space>
       </template>
     </n-modal>
