@@ -51,8 +51,19 @@ const editor = useEditor({
   },
 })
 
-function undo() { editor.value?.chain().focus().undo().run() }
-function redo() { editor.value?.chain().focus().redo().run() }
+function undo() {
+  const ed = editor.value
+  if (!ed) return
+  // 直接用 commands.undo()，避免 chain().focus() 产生多余事务干扰历史追踪
+  ed.commands.undo()
+  ed.view.focus()
+}
+function redo() {
+  const ed = editor.value
+  if (!ed) return
+  ed.commands.redo()
+  ed.view.focus()
+}
 const undoable = computed(() => hasUserEdited.value && (editor.value?.can().undo() ?? false))
 const redoable = computed(() => editor.value?.can().redo() ?? false)
 
@@ -130,9 +141,20 @@ function setEditorContent(text: string) {
 
 // === 切换章节时同步编辑器（初始化时不执行） ===
 const isInitializing = ref(true)
-watch(currentChapter, (ch) => {
+watch(currentChapter, (ch, oldCh) => {
   if (ch && editor.value && !isInitializing.value) {
-    editor.value.commands.setContent(toTiptapHtml(ch.content))
+    // 同一章节（保存触发的引用更新），不重置编辑器内容和历史，只更新 editContent
+    if (oldCh && ch.id === oldCh.id) {
+      editContent.value = ch.content
+      return
+    }
+    // 真正的章节切换，用 addToHistory=false 的事务设内容，避免产生 undo 记录
+    const { state, view, schema } = editor.value
+    const html = toTiptapHtml(ch.content)
+    const doc = createDocument(html, schema)
+    const tr = state.tr.replaceWith(0, state.doc.content.size, doc)
+    tr.setMeta('addToHistory', false)
+    view.dispatch(tr)
     editContent.value = ch.content
     contentChanged.value = false
     hasUserEdited.value = false
