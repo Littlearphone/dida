@@ -239,29 +239,15 @@ function handleEditDesc(e: MouseEvent) {
     flex: 1;
     height: 34px;
     border-radius: 0;
-    /* n-button text 默认样式覆盖 */
     --n-text-color: #555 !important;
     --n-text-color-hover: #333 !important;
     --n-text-color-pressed: #333 !important;
+    --n-icon-margin: 0 !important;
     &:not(:last-child) {
       border-right: 1px solid #eee;
     }
     &:hover {
       background: #f5f5f5;
-    }
-    :deep(.n-button__content) {
-      gap: 3px;
-      font-size: 12px;
-      > span:last-child {
-        max-width: 0;
-        overflow: hidden;
-        transition: max-width 0.2s ease;
-        white-space: nowrap;
-        display: inline-block;
-      }
-    }
-    &:hover :deep(.n-button__content > span:last-child) {
-      max-width: 60px;
     }
   }
 
@@ -270,7 +256,24 @@ function handleEditDesc(e: MouseEvent) {
     --n-text-color-pressed: #d03050 !important;
     &:hover { background: #fff5f5; }
   }
+}
 
-  .action-btn-danger:hover { color: #d03050 !important; background: #fff5f5 !important; }
+/* :deep() 放在 .novel-card 嵌套外部，
+   避免 SCSS 嵌套导致 Vue scoped compiler 生成错误的选择器（[data-v] 中间多空格） */
+.novel-card .action-btn :deep(.n-button__content) {
+  font-size: 12px;
+}
+.novel-card .action-btn :deep(.n-button__content > span:last-child) {
+  /* flex 布局下 flex 子元素需 min-width:0 才能收缩到 content 宽度以下 */
+  min-width: 0;
+  flex-shrink: 1;
+  max-width: 0;
+  overflow: hidden;
+  transition: max-width 0.2s ease;
+  white-space: nowrap;
+  display: inline-block;
+}
+.novel-card .action-btn:hover :deep(.n-button__content > span:last-child) {
+  max-width: 60px;
 }
 </style>

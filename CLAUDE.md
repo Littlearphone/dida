@@ -73,7 +73,7 @@ cd backend && go run .    # 终端2：Go 后端（需要先构建前端）
     --n-text-color-hover: #333 !important;
   }
   ```
-- 对于文本渐显动画（hover 时 max-width 过渡），使用 `:deep(.n-button__content > span:last-child)` 选择器定位按钮文本
+- 对于文本渐显动画（hover 时 max-width 过渡），使用 `:deep(.n-button__content > span:last-child)` 选择器定位按钮文本。注意 flex 子元素需添加 `min-width: 0; flex-shrink: 1;` 才能让 `max-width` 收缩生效
 - **CSS 变量优先**: 自定义 NaiveUI 组件样式时优先使用 `--n-*` CSS 变量覆盖，其次使用 `:deep()` 穿透，避免直接覆盖全局类名
 
 ## 开发规则
