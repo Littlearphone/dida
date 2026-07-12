@@ -11,6 +11,8 @@ export interface EditorActions {
   replaceSelection?: (text: string) => void
   /** 将纯文本解析为段落后追加到文档末尾 */
   appendContent?: (text: string) => void
+  /** 内容插入后触发 AI 提取元数据（大纲/角色/关系/事件），自动弹窗展示结果 */
+  triggerExtract?: () => void
 }
 
 export const EDITOR_ACTIONS_KEY: InjectionKey<EditorActions> = Symbol('editorActions')

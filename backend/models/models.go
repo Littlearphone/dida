@@ -154,25 +154,37 @@ type ChapterSplitRequest struct {
 
 // ContinueWriteRequest 续写请求
 type ContinueWriteRequest struct {
-	ChapterContent string `json:"chapterContent"`
-	Outline        string `json:"outline"`
-	Requirement    string `json:"requirement"`
+	ChapterContent         string              `json:"chapterContent"`
+	PreviousChapterContent string              `json:"previousChapterContent,omitempty"` // 上一章内容（新建章节时提供作为上下文）
+	Outline                string              `json:"outline"`
+	Requirement            string              `json:"requirement"`
+	Characters             []Character         `json:"characters,omitempty"`
+	Relationships          []NovelRelationship `json:"relationships,omitempty"`
+	Events                 []Event             `json:"events,omitempty"`
 }
 
 // PolishRequest 润色请求
 type PolishRequest struct {
-	Content     string `json:"content"`     // 选中的内容或整章内容
-	IsSelection bool   `json:"isSelection"` // 是否为选中内容
-	Outline     string `json:"outline"`
-	Requirement string `json:"requirement"`
+	Content                string              `json:"content"`                          // 选中的内容或整章内容
+	PreviousChapterContent string              `json:"previousChapterContent,omitempty"` // 上一章内容（剧情上下文参考）
+	IsSelection            bool                `json:"isSelection"`                      // 是否为选中内容
+	Outline                string              `json:"outline"`
+	Requirement            string              `json:"requirement"`
+	Characters             []Character         `json:"characters,omitempty"`
+	Relationships          []NovelRelationship `json:"relationships,omitempty"`
+	Events                 []Event             `json:"events,omitempty"`
 }
 
 // ExpandRequest 扩写请求
 type ExpandRequest struct {
-	Content     string `json:"content"`
-	IsSelection bool   `json:"isSelection"`
-	Outline     string `json:"outline"`
-	Requirement string `json:"requirement"`
+	Content                string              `json:"content"`
+	PreviousChapterContent string              `json:"previousChapterContent,omitempty"`
+	IsSelection            bool                `json:"isSelection"`
+	Outline                string              `json:"outline"`
+	Requirement            string              `json:"requirement"`
+	Characters             []Character         `json:"characters,omitempty"`
+	Relationships          []NovelRelationship `json:"relationships,omitempty"`
+	Events                 []Event             `json:"events,omitempty"`
 }
 
 // AIResult AI处理结果

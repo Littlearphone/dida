@@ -1,16 +1,21 @@
 <script setup lang="ts">
-import { ref, inject, onUnmounted } from 'vue'
+import { ref, inject, watch, onUnmounted } from 'vue'
 import { NModal, NAlert, NForm, NFormItem, NInput, NButton, NSpace, NIcon, NProgress, useMessage } from 'naive-ui'
 import {
   CopyOutline as CopyIcon, ArrowDownOutline as InsertIcon,
   AddCircleOutline as NewChapterIcon,
   ColorWandOutline as PolishIcon, CreateOutline as ExpandIcon,
+  RefreshOutline as RefreshIcon,
 } from '@vicons/ionicons5'
 import { useNovelStore } from '../../stores/novel'
 import * as aiApi from '../../api/ai'
 import { EDITOR_ACTIONS_KEY } from '../../types/editor'
 
-defineProps<{ show: boolean }>()
+const props = defineProps<{
+  show: boolean
+  /** 从 AIEditDialog 返回的精炼结果（润色/扩写后），替换当前续写内容 */
+  refinedContent?: string
+}>()
 const emit = defineEmits<{
   'update:show': [value: boolean]
   /** 对续写结果进行二次处理（润色/扩写） */
@@ -34,6 +39,25 @@ let abortController: AbortController | null = null
 const MAX_RETRIES = 2
 let retries = 0
 let cancelRequested = false
+
+/** 将 HTML 转为纯文本并保留段落结构（双换行分隔） */
+function htmlToPlainText(html: string): string {
+  if (!/<\/?[a-z][\s\S]*?>/i.test(html)) return html
+  const div = document.createElement('div')
+  div.innerHTML = html
+  div.querySelectorAll('p, div, h1, h2, h3, h4, h5, h6, li, blockquote').forEach(el => el.after('\n\n'))
+  div.querySelectorAll('br').forEach(el => el.replaceWith('\n'))
+  return (div.textContent || '').replace(/\n{3,}/g, '\n\n').trim()
+}
+
+/** 归一化段落换行：当 AI 返回的内容没有双换行但存在单换行时，将单换行视为段落分隔 */
+function normalizeParagraphs(text: string): string {
+  if (!text) return text
+  if (!/\n\n/.test(text) && /\n/.test(text)) {
+    return text.split(/\n+/).map(s => s.trim()).filter(Boolean).join('\n\n')
+  }
+  return text
+}
 
 /** 模拟进度的定时器，让进度条平滑递增到 90% */
 let progressTimer: ReturnType<typeof setInterval> | null = null
@@ -90,15 +114,26 @@ async function handleContinueWrite() {
     startProgressSimulation()
 
     try {
+      // 获取前一章内容作为剧情连续性上下文（新建续写章节时尤其重要）
+      const chapters = novelStore.chapters
+      const curIdx = novelStore.currentChapter
+        ? chapters.findIndex(c => c.id === novelStore.currentChapter.id)
+        : -1
+      const prevCh = curIdx > 0 ? chapters[curIdx - 1] : null
+
       // 流式续写：onChunk 回调实时更新内容和进度
       const fullText = await aiApi.continueWrite(
         {
-          chapterContent: novelStore.currentChapter.content,
+          chapterContent: htmlToPlainText(novelStore.currentChapter.content),
+          previousChapterContent: htmlToPlainText(prevCh?.content || ''),
           outline: novelStore.currentNovel?.outline || '',
           requirement: continueRequirement.value,
+          characters: novelStore.currentNovel?.characters,
+          relationships: novelStore.currentNovel?.relationships,
+          events: novelStore.currentNovel?.events,
         },
         (fullText: string) => {
-          continueResult.value = fullText
+          continueResult.value = normalizeParagraphs(fullText)
           if (generateProgress.value < 95) {
             generateProgress.value = Math.max(generateProgress.value, 70)
             generateStatus.value = 'AI 正在生成内容...'
@@ -110,7 +145,7 @@ async function handleContinueWrite() {
 
       if (fullText) {
         // 成功获取内容
-        continueResult.value = fullText
+        continueResult.value = normalizeParagraphs(fullText)
         generateProgress.value = 100
         generateStatus.value = '续写完成'
         continueLoading.value = false
@@ -169,6 +204,8 @@ function insertToChapterEnd() {
   // 使用 appendContent 将续写文本转段落后追加到文档末尾，避免 HTML+纯文本拼接丢失换行分段
   editorActions.appendContent?.(continueResult.value)
   closeDialog()
+  // 内容插入后自动提取元数据（大纲/角色/关系/事件）
+  editorActions.triggerExtract?.()
   message.success('已插入到章节末尾')
 }
 
@@ -180,7 +217,12 @@ function insertAsNewChapter() {
     content: continueResult.value,
     order: novelStore.chapters.length + 1,
   }).then(ch => {
-    if (ch) { novelStore.selectChapter(ch); message.success('已创建新章节') }
+    if (ch) {
+      novelStore.selectChapter(ch)
+      // 新建章节后自动提取元数据
+      editorActions.triggerExtract?.()
+      message.success('已创建新章节')
+    }
   })
   closeDialog()
 }
@@ -204,6 +246,22 @@ function closeDialog() {
   generateProgress.value = 0
   generateStatus.value = ''
 }
+
+/** 重新续写：回到输入阶段，保留之前的要求文本 */
+function retryContinue() {
+  showContinueResult.value = false
+  continueResult.value = ''
+  generateProgress.value = 0
+  generateStatus.value = ''
+}
+
+/** 接收外部传入的精炼结果（润色/扩写后），替换续写框结果 */
+watch(() => props.refinedContent, (val: string | undefined) => {
+  if (val) {
+    continueResult.value = val
+    showContinueResult.value = true
+  }
+})
 
 onUnmounted(() => {
   stopProgressSimulation()
@@ -236,12 +294,15 @@ onUnmounted(() => {
           {{ generateStatus }}
         </n-progress>
       </div>
-      <!-- 预览区域：flex:1 自适应填满剩余空间，保留换行 -->
-      <div style="flex: 1; min-height: 0; overflow-y: auto; border: 1px solid #e0e0e0; border-radius: 6px; background: #fafafa;">
-        <div style="padding: 20px; white-space: pre-wrap; line-height: 1.8; font-size: 15px; color: #333;">
-          {{ continueResult || (continueLoading ? '等待 AI 响应...' : '') }}
-        </div>
-      </div>
+      <!-- 预览区域：可编辑文本区域，加载时禁用 -->
+      <n-input
+        v-model:value="continueResult"
+        type="textarea"
+        :disabled="continueLoading"
+        placeholder="等待 AI 响应..."
+        :resizable="false"
+        style="flex: 1; min-height: 60px;"
+      />
     </div>
     <template #footer>
       <n-space justify="end">
@@ -253,6 +314,9 @@ onUnmounted(() => {
           <n-button quaternary @click="cancelContinue">取消生成</n-button>
         </template>
         <template v-else>
+          <n-button quaternary @click="retryContinue">
+            <template #icon><n-icon><RefreshIcon/></n-icon></template>重新续写
+          </n-button>
           <n-button quaternary @click="copyResult">
             <template #icon><n-icon><CopyIcon/></n-icon></template>复制
           </n-button>

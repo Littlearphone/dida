@@ -122,6 +122,7 @@ const totalWords = computed(() =>
                   v-model:value="localDescription"
                   type="textarea" placeholder="输入小说简介..."
                   :rows="4" :maxlength="2000" show-count
+                  :resizable="false"
                 />
               </div>
               <div class="field-section fill">
@@ -131,6 +132,7 @@ const totalWords = computed(() =>
                   type="textarea" placeholder="输入故事大纲，支持多段落..."
                   :maxlength="50000" show-count
                   class="outline-input"
+                  :resizable="false"
                 />
               </div>
             </div>
@@ -261,10 +263,16 @@ const totalWords = computed(() =>
   font-size: 13px;
   font-weight: 500;
 }
-.outline-input {
-  flex: 1;
-  min-height: 0;
-  resize: none;
+.dialog-modal {
+  .outline-input {
+    flex: 1;
+    resize: none;
+    min-height: 0;
+
+    & :deep(.n-input__textarea-el) {
+      height: 52vh !important;
+    }
+  }
 }
 
 /* 章节概览统计 */

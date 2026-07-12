@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { NButton, NText, NSpace, NTooltip } from 'naive-ui'
-import { SparklesOutline as SparklesIcon, ColorWandOutline as WandIcon, CreateOutline as ExpandIcon, SettingsOutline as AISetupIcon, InformationCircleOutline as InfoIcon } from '@vicons/ionicons5'
+import { SparklesOutline as SparklesIcon, ColorWandOutline as WandIcon, CreateOutline as ExpandIcon, SettingsOutline as AISetupIcon, InformationCircleOutline as InfoIcon, DocumentTextOutline as ExtractIcon } from '@vicons/ionicons5'
 
-const props = defineProps<{ wordCount: number; aiConfigured: boolean; contentChanged: boolean }>()
+const props = defineProps<{ wordCount: number; aiConfigured: boolean; contentChanged: boolean; extractLoading?: boolean }>()
 const saveLabel = computed(() => props.contentChanged ? '未保存' : '已保存')
 const saveColor = computed(() => props.contentChanged ? '#e6a23c' : '#18a058')
 
@@ -11,6 +11,8 @@ const emit = defineEmits<{
   continue: []
   polish: []
   expand: []
+  /** 提取/补充选中内容或整章的元数据（大纲/角色/关系/事件） */
+  extract: []
   setupAI: []
   showInfo: []
 }>()
@@ -34,6 +36,9 @@ const emit = defineEmits<{
       </n-button>
       <n-button size="small" type="warning" @click="emit('expand')">
         <template #icon><n-icon size="16"><ExpandIcon/></n-icon></template>AI 扩写
+      </n-button>
+      <n-button size="small" secondary :loading="extractLoading" :disabled="extractLoading" @click="emit('extract')">
+        <template #icon><n-icon size="16"><ExtractIcon/></n-icon></template>{{ extractLoading ? '提取中…' : '提取信息' }}
       </n-button>
     </template>
     <template v-else>

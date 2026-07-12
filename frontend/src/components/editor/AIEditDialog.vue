@@ -15,17 +15,50 @@ const props = defineProps<{
   /** 外部传入待处理内容（如续写结果的二次处理），此时不再使用编辑器选区/章节内容 */
   externalContent?: string
 }>()
-const emit = defineEmits<{ 'update:show': [value: boolean] }>()
+const emit = defineEmits<{
+  'update:show': [value: boolean]
+  /** 外部传入内容的处理结果，由父组件转发回源头（如续写框） */
+  'replaceExternal': [text: string]
+}>()
 
 const novelStore = useNovelStore()
 const message = useMessage()
 const editorActions = inject(EDITOR_ACTIONS_KEY)!
+
+/** 将 HTML 转为纯文本并保留段落结构（双换行分隔）
+ *  对纯文本（无 HTML 标签）也归一化换行，确保段落结构不被吞掉 */
+function htmlToPlainText(html: string): string {
+  if (!/<\/?[a-z][\s\S]*?>/i.test(html)) {
+    // 已无 HTML 标签的纯文本，统一归一化换行
+    return normalizeParagraphs(html)
+  }
+  const div = document.createElement('div')
+  div.innerHTML = html
+  // 在每个块级元素后插入换行，保留段落分隔
+  div.querySelectorAll('p, div, h1, h2, h3, h4, h5, h6, li, blockquote').forEach(el => {
+    el.after('\n\n')
+  })
+  // <br> 转单换行
+  div.querySelectorAll('br').forEach(el => el.replaceWith('\n'))
+  return normalizeParagraphs(div.textContent || '')
+}
+
+/** 归一化段落换行：当 AI 返回的内容没有双换行但存在单换行时，将单换行视为段落分隔
+ *  已有双换行时原样保留，避免流式中间状态尾部 \n\n 被过滤掉 */
+function normalizeParagraphs(text: string): string {
+  if (!text) return text
+  if (!/\n\n/.test(text) && /\n/.test(text)) {
+    return text.split(/\n+/).map(s => s.trim()).filter(Boolean).join('\n\n')
+  }
+  return text
+}
 
 const requirement = ref('')
 const loading = ref(false)
 const originalContent = ref('')
 const editResult = ref('')
 const showResult = ref(false)
+const editingResult = ref(false) // 结果预览区是否切换到编辑模式
 const progress = ref(0)
 const progressText = ref('')
 
@@ -54,6 +87,7 @@ function resetState() {
   editResult.value = ''
   originalContent.value = ''
   showResult.value = false
+  editingResult.value = false
   hasSelection.value = false
   savedSelectionText.value = ''
   progress.value = 0
@@ -113,10 +147,12 @@ async function handleEdit() {
   retries = 0
   cancelRequested = false
 
-  // 使用弹框打开时保存的选中文本，或整章内容
-  originalContent.value = savedSelectionText.value
+  // 使用弹框打开时保存的选中文本，或整章内容，始终转为纯文本保留段落
+  const rawContent = savedSelectionText.value
     ? savedSelectionText.value
     : (editorActions.getContent() || novelStore.currentChapter?.content || '')
+  const plainContent = htmlToPlainText(rawContent)
+  originalContent.value = plainContent
 
   editResult.value = ''
   showResult.value = true
@@ -144,15 +180,26 @@ async function handleEdit() {
     startProgressSimulation()
 
     try {
+      // 获取前一章内容作为剧情上下文
+      const chapters = novelStore.chapters
+      const curIdx = novelStore.currentChapter
+        ? chapters.findIndex(c => c.id === novelStore.currentChapter.id)
+        : -1
+      const prevCh = curIdx > 0 ? chapters[curIdx - 1] : null
+
       const fullText = await apiFn(
         {
-          content: originalContent.value,
+          content: plainContent,
           isSelection: !!savedSelectionText.value,
+          previousChapterContent: htmlToPlainText(prevCh?.content || ''),
           outline: novelStore.currentNovel?.outline || '',
           requirement: requirement.value,
+          characters: novelStore.currentNovel?.characters,
+          relationships: novelStore.currentNovel?.relationships,
+          events: novelStore.currentNovel?.events,
         },
         (fullText: string) => {
-          editResult.value = fullText
+          editResult.value = normalizeParagraphs(fullText)
           if (progress.value < 95) {
             progress.value = Math.max(progress.value, 70)
             progressText.value = `AI 正在${modeLabel}...`
@@ -164,7 +211,7 @@ async function handleEdit() {
 
       if (fullText) {
         // 成功拿到内容
-        editResult.value = fullText
+        editResult.value = normalizeParagraphs(fullText)
         progress.value = 100
         progressText.value = `${modeLabel}完成`
         loading.value = false
@@ -220,15 +267,22 @@ function cancelEdit() {
 
 function replaceContent() {
   if (!editResult.value) return
-  if (savedSelectionText.value && editorActions.replaceSelection) {
+  if (props.externalContent) {
+    // 续写结果二次处理（润色/扩写）：将 AI 结果发回父组件，由父组件转填回续写框
+    emit('replaceExternal', editResult.value)
+    closeDialog()
+    message.success('已替换续写框中的内容')
+  } else if (savedSelectionText.value && editorActions.replaceSelection) {
     // 有选中 → 通过编辑器替换选区
     editorActions.replaceSelection(editResult.value)
+    message.success('已替换原文')
+    closeDialog()
   } else {
     // 整章 → 替换全部
     editorActions.setContent(editResult.value)
+    message.success('已替换原文')
+    closeDialog()
   }
-  message.success('已替换原文')
-  closeDialog()
 }
 
 function copyResult() {
@@ -296,7 +350,7 @@ onUnmounted(() => {
       </n-form>
     </div>
 
-    <!-- 结果阶段：有选中时双栏，无选中时单栏（同续写） -->
+    <!-- 结果阶段：始终双栏对比（原文 + AI 结果），扩写模式下也能对照查看 -->
     <div v-if="showResult" style="display: flex; flex-direction: column; flex: 1; min-height: 0;">
       <!-- 进度条 -->
       <div v-if="loading" style="flex-shrink: 0; margin-bottom: 12px;">
@@ -306,8 +360,8 @@ onUnmounted(() => {
         </n-progress>
       </div>
 
-      <!-- 有选中文本时：双栏对比 -->
-      <n-grid v-if="hasSelection" :cols="2" :x-gap="12" style="flex: 1; min-height: 0;">
+      <!-- 双栏对比：左侧原文，右侧 AI 结果 -->
+      <n-grid :cols="2" :x-gap="12" style="flex: 1; min-height: 0;">
         <n-gi style="display: flex; flex-direction: column; min-height: 0;">
           <n-alert type="info" :bordered="false" style="flex-shrink: 0; margin-bottom: 8px;">原文</n-alert>
           <div style="flex: 1; min-height: 0; overflow-y: auto; border: 1px solid #e0e0e0; border-radius: 6px; background: #fafafa;">
@@ -318,27 +372,22 @@ onUnmounted(() => {
         </n-gi>
         <n-gi style="display: flex; flex-direction: column; min-height: 0;">
           <n-alert type="success" :bordered="false" style="flex-shrink: 0; margin-bottom: 8px;">{{ resultLabel }}</n-alert>
-          <n-input
+          <!-- 加载中/编辑模式/无内容 → 可编辑输入框，否则格式化预览 -->
+          <n-input v-if="loading || editingResult || !editResult"
             v-model:value="editResult"
             type="textarea"
             :disabled="loading"
             placeholder="等待 AI 响应..."
-            :resizable="false"
+            :resizable="true"
+            class="result-textarea"
             style="flex: 1; min-height: 60px;"
           />
+          <div v-else class="result-text-display" @click="editingResult = true">
+            {{ editResult }}
+            <div class="result-edit-hint">点击编辑结果</div>
+          </div>
         </n-gi>
       </n-grid>
-
-      <!-- 无选中文本时：单栏预览（同续写） -->
-      <n-input
-        v-else
-        v-model:value="editResult"
-        type="textarea"
-        :disabled="loading"
-        placeholder="等待 AI 响应..."
-        :resizable="false"
-        style="flex: 1; min-height: 60px;"
-      />
     </div>
 
     <template #footer>
@@ -375,5 +424,39 @@ onUnmounted(() => {
   min-height: 0;
   display: flex;
   flex-direction: column;
+}
+
+/* 结果预览：保留换行，清晰区分段落 */
+.result-text-display {
+  flex: 1;
+  min-height: 60px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  padding: 12px 14px;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  line-height: 1.9;
+  font-size: 14px;
+  color: #333;
+  cursor: text;
+  background: #fff;
+}
+.result-text-display:hover {
+  border-color: #c0c0c0;
+}
+.result-edit-hint {
+  margin-top: 8px;
+  font-size: 11px;
+  color: #bbb;
+  text-align: center;
+  border-top: 1px dashed #eee;
+  padding-top: 6px;
+}
+.result-text-display:hover .result-edit-hint {
+  color: #888;
+}
+/* 结果区 textarea 保留换行显示 */
+:deep(.result-textarea textarea) {
+  white-space: pre-wrap !important;
 }
 </style>

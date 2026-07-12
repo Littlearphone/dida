@@ -85,6 +85,7 @@ func (h *AIHandler) HandleSplitChapters(w http.ResponseWriter, r *http.Request) 
 
 // HandleExtractInfo 提取小说信息（大纲、角色、关系、事件）
 // POST /api/ai/extract-info
+// 支持传入已有元数据进行增量提取
 func (h *AIHandler) HandleExtractInfo(w http.ResponseWriter, r *http.Request) {
 	settings := h.settingsStore.Get()
 	if settings.APIKey == "" {
@@ -93,8 +94,12 @@ func (h *AIHandler) HandleExtractInfo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Chapters    []models.Chapter `json:"chapters"`
-		FullContent string           `json:"fullContent"`
+		Chapters           []models.Chapter           `json:"chapters"`
+		FullContent        string                     `json:"fullContent"`
+		ExistingOutline    string                     `json:"existingOutline"`
+		ExistingCharacters []models.Character         `json:"existingCharacters"`
+		ExistingRelations  []models.NovelRelationship `json:"existingRelations"`
+		ExistingEvents     []models.Event             `json:"existingEvents"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "请求格式错误")
@@ -102,12 +107,52 @@ func (h *AIHandler) HandleExtractInfo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	client := h.createClient()
-	result, err := client.ExtractNovelInfo(req.Chapters, req.FullContent)
+	result, err := client.ExtractNovelInfo(req.Chapters, req.FullContent,
+		req.ExistingOutline, req.ExistingCharacters, req.ExistingRelations, req.ExistingEvents)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "AI提取失败: "+err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
+}
+
+// handleEditSSE 统一的 SSE 流式处理模板
+// execStream 是一个闭包，由各 handler 传入对应的 Stream 方法调用
+func (h *AIHandler) handleEditSSE(w http.ResponseWriter, execStream func(func(string)) (string, error), logOp string) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "不支持流式响应")
+		return
+	}
+
+	fullText, err := execStream(func(chunk string) {
+		data := fmt.Sprintf(`{"text":%s}`, jsonEncodeString(chunk))
+		fmt.Fprintf(w, "data: %s\n\n", data)
+		flusher.Flush()
+	})
+
+	if err != nil {
+		log.Printf("[API] 流式%s错误: %v", logOp, err)
+		errData := fmt.Sprintf(`{"error":"%s"}`, jsonEncodeString(err.Error()))
+		fmt.Fprintf(w, "data: %s\n\n", errData)
+	}
+	fmt.Fprintf(w, "data: [DONE]\n\n")
+	flusher.Flush()
+
+	if err == nil {
+		log.Printf("[API] 流式%s完成 | 输出字数=%d", logOp, len([]rune(fullText)))
+	}
+}
+
+// jsonEncodeString 对字符串进行 JSON 编码（转义特殊字符）
+func jsonEncodeString(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
 }
 
 // HandleContinueWrite AI续写
@@ -128,64 +173,20 @@ func (h *AIHandler) HandleContinueWrite(w http.ResponseWriter, r *http.Request) 
 
 	client := h.createClient()
 
-	// 检查客户端是否期望流式响应
 	accept := r.Header.Get("Accept")
 	if strings.Contains(accept, "text/event-stream") {
-		h.handleContinueWriteSSE(w, client, req)
+		h.handleEditSSE(w, func(onChunk func(string)) (string, error) {
+			return client.ContinueWriteStream(req.ChapterContent, req.PreviousChapterContent, req.Outline, req.Requirement, req.Characters, req.Relationships, req.Events, onChunk)
+		}, "续写")
 		return
 	}
 
-	// 非流式回退
-	result, err := client.ContinueWrite(req.ChapterContent, req.Outline, req.Requirement)
+	result, err := client.ContinueWrite(req.ChapterContent, req.PreviousChapterContent, req.Outline, req.Requirement, req.Characters, req.Relationships, req.Events)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "AI续写失败: "+err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"result": result})
-}
-
-// handleContinueWriteSSE 以 SSE 流式返回 AI 续写内容
-func (h *AIHandler) handleContinueWriteSSE(w http.ResponseWriter, client *ai.DeepSeekClient, req models.ContinueWriteRequest) {
-	// 设置 SSE 响应头
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("X-Accel-Buffering", "no") // 禁用 nginx 缓冲
-
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		writeError(w, http.StatusInternalServerError, "不支持流式响应")
-		return
-	}
-
-	// 发送流式续写请求，onChunk 回调将每块内容以 SSE 格式写入响应
-	fullText, err := client.ContinueWriteStream(req.ChapterContent, req.Outline, req.Requirement,
-		func(chunk string) {
-			// 将每段内容编码为 SSE data 事件
-			data := fmt.Sprintf(`{"text":%s}`, jsonEncodeString(chunk))
-			fmt.Fprintf(w, "data: %s\n\n", data)
-			flusher.Flush()
-		},
-	)
-
-	// 发送完成标记
-	if err != nil {
-		log.Printf("[API] 流式续写错误: %v", err)
-		errData := fmt.Sprintf(`{"error":"%s"}`, jsonEncodeString(err.Error()))
-		fmt.Fprintf(w, "data: %s\n\n", errData)
-	}
-	fmt.Fprintf(w, "data: [DONE]\n\n")
-	flusher.Flush()
-
-	if err == nil {
-		log.Printf("[API] 流式续写完成 | 输出字数=%d", len([]rune(fullText)))
-	}
-}
-
-// jsonEncodeString 对字符串进行 JSON 编码（转义特殊字符）
-func jsonEncodeString(s string) string {
-	b, _ := json.Marshal(s)
-	return string(b)
 }
 
 // HandlePolish AI润色
@@ -206,15 +207,15 @@ func (h *AIHandler) HandlePolish(w http.ResponseWriter, r *http.Request) {
 
 	client := h.createClient()
 
-	// 检查客户端是否期望流式响应
 	accept := r.Header.Get("Accept")
 	if strings.Contains(accept, "text/event-stream") {
-		h.handlePolishSSE(w, client, req)
+		h.handleEditSSE(w, func(onChunk func(string)) (string, error) {
+			return client.PolishStream(req.Content, req.IsSelection, req.Outline, req.Requirement, req.PreviousChapterContent, req.Characters, req.Relationships, req.Events, onChunk)
+		}, "润色")
 		return
 	}
 
-	// 非流式回退
-	result, err := client.Polish(req.Content, req.IsSelection, req.Outline, req.Requirement)
+	result, err := client.Polish(req.Content, req.IsSelection, req.Outline, req.Requirement, req.PreviousChapterContent, req.Characters, req.Relationships, req.Events)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "AI润色失败: "+err.Error())
 		return
@@ -223,40 +224,6 @@ func (h *AIHandler) HandlePolish(w http.ResponseWriter, r *http.Request) {
 		Original: req.Content,
 		Result:   result,
 	})
-}
-
-// handlePolishSSE 以 SSE 流式返回 AI 润色内容
-func (h *AIHandler) handlePolishSSE(w http.ResponseWriter, client *ai.DeepSeekClient, req models.PolishRequest) {
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("X-Accel-Buffering", "no")
-
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		writeError(w, http.StatusInternalServerError, "不支持流式响应")
-		return
-	}
-
-	fullText, err := client.PolishStream(req.Content, req.IsSelection, req.Outline, req.Requirement,
-		func(chunk string) {
-			data := fmt.Sprintf(`{"text":%s}`, jsonEncodeString(chunk))
-			fmt.Fprintf(w, "data: %s\n\n", data)
-			flusher.Flush()
-		},
-	)
-
-	if err != nil {
-		log.Printf("[API] 流式润色错误: %v", err)
-		errData := fmt.Sprintf(`{"error":"%s"}`, jsonEncodeString(err.Error()))
-		fmt.Fprintf(w, "data: %s\n\n", errData)
-	}
-	fmt.Fprintf(w, "data: [DONE]\n\n")
-	flusher.Flush()
-
-	if err == nil {
-		log.Printf("[API] 流式润色完成 | 输出字数=%d", len([]rune(fullText)))
-	}
 }
 
 // HandleExpand AI扩写
@@ -277,15 +244,15 @@ func (h *AIHandler) HandleExpand(w http.ResponseWriter, r *http.Request) {
 
 	client := h.createClient()
 
-	// 检查客户端是否期望流式响应
 	accept := r.Header.Get("Accept")
 	if strings.Contains(accept, "text/event-stream") {
-		h.handleExpandSSE(w, client, req)
+		h.handleEditSSE(w, func(onChunk func(string)) (string, error) {
+			return client.ExpandStream(req.Content, req.IsSelection, req.Outline, req.Requirement, req.PreviousChapterContent, req.Characters, req.Relationships, req.Events, onChunk)
+		}, "扩写")
 		return
 	}
 
-	// 非流式回退
-	result, err := client.Expand(req.Content, req.IsSelection, req.Outline, req.Requirement)
+	result, err := client.Expand(req.Content, req.IsSelection, req.Outline, req.Requirement, req.PreviousChapterContent, req.Characters, req.Relationships, req.Events)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "AI扩写失败: "+err.Error())
 		return
@@ -294,38 +261,4 @@ func (h *AIHandler) HandleExpand(w http.ResponseWriter, r *http.Request) {
 		Original: req.Content,
 		Result:   result,
 	})
-}
-
-// handleExpandSSE 以 SSE 流式返回 AI 扩写内容
-func (h *AIHandler) handleExpandSSE(w http.ResponseWriter, client *ai.DeepSeekClient, req models.ExpandRequest) {
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("X-Accel-Buffering", "no")
-
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		writeError(w, http.StatusInternalServerError, "不支持流式响应")
-		return
-	}
-
-	fullText, err := client.ExpandStream(req.Content, req.IsSelection, req.Outline, req.Requirement,
-		func(chunk string) {
-			data := fmt.Sprintf(`{"text":%s}`, jsonEncodeString(chunk))
-			fmt.Fprintf(w, "data: %s\n\n", data)
-			flusher.Flush()
-		},
-	)
-
-	if err != nil {
-		log.Printf("[API] 流式扩写错误: %v", err)
-		errData := fmt.Sprintf(`{"error":"%s"}`, jsonEncodeString(err.Error()))
-		fmt.Fprintf(w, "data: %s\n\n", errData)
-	}
-	fmt.Fprintf(w, "data: [DONE]\n\n")
-	flusher.Flush()
-
-	if err == nil {
-		log.Printf("[API] 流式扩写完成 | 输出字数=%d", len([]rune(fullText)))
-	}
 }

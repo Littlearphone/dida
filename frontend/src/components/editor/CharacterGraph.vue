@@ -9,8 +9,8 @@ import {
 } from '@vicons/ionicons5'
 import { Network } from 'vis-network'
 import { DataSet } from 'vis-data'
-import type { Character, NovelRelationship } from '@/types'
-import { useNovelStore } from '@/stores/novel.ts'
+import type { Character, NovelRelationship } from '../../types'
+import { useNovelStore } from '../../stores/novel'
 
 
 /** vis-network 节点数据结构 */
@@ -53,7 +53,7 @@ const emit = defineEmits<{
 const message = useMessage()
 const novelStore = useNovelStore()
 const containerRef = ref<HTMLDivElement>()
-let network: Network | null = null
+let network: any = null
 
 /** 是否有已定义的关系 */
 const hasRelationships = computed(() =>
@@ -456,7 +456,7 @@ function buildGraph() {
   const nodes = new DataSet(nodeItems as any)
   const edges = new DataSet(edgeItems as any)
 
-  network = new Network(
+  network = new (Network as any)(
     containerRef.value,
     // 使用类型断言绕过 vis 类型推断限制
     { nodes, edges } as any,
@@ -479,7 +479,7 @@ function buildGraph() {
   )
 
   // 点击事件：编辑角色（连线模式下 canvas 已禁用指针事件，不会触发此处）
-  network.on('click', (params) => {
+  network.on('click', (params: any) => {
     if (connectMode.value) return // 安全兜底，连线模式不处理
     if (params.nodes.length === 0) return
     const nodeIdx = params.nodes[0] as number
@@ -577,7 +577,7 @@ function reLayout() {
       <n-button size="small" secondary @click="reLayout" :disabled="!network">
         重新布局
       </n-button>
-      <n-button size="small" :type="connectMode ? 'warning' : 'secondary'" @click="handleConnectClick" :disabled="characters.length === 0">
+      <n-button size="small" :type="connectMode ? 'warning' : 'default' as any" @click="handleConnectClick" :disabled="characters.length === 0">
         连线
       </n-button>
       <n-text v-if="characters.length > 0" depth="3" style="font-size: 13px;">

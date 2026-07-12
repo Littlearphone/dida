@@ -66,20 +66,20 @@ func (h *ChapterHandler) HandleUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Title   string `json:"title"`
-		Content string `json:"content"`
+		Title   *string `json:"title,omitempty"`
+		Content *string `json:"content,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "请求格式错误")
 		return
 	}
 
-	if req.Title != "" {
-		existing.Title = req.Title
+	if req.Title != nil {
+		existing.Title = *req.Title
 	}
-	if req.Content != "" || r.ContentLength > 0 {
+	if req.Content != nil {
 		// 允许清空内容
-		existing.Content = req.Content
+		existing.Content = *req.Content
 	}
 
 	if err := h.novelStore.UpdateChapter(existing); err != nil {

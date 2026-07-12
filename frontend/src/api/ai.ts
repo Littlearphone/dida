@@ -1,4 +1,4 @@
-import type {AIResult, AIStatus, ExtractionResult, SplitResult} from '../types'
+import type {AIResult, AIStatus, Character, Event, ExtractionResult, NovelRelationship, SplitResult} from '../types'
 
 const BASE = '/api/ai'
 
@@ -23,10 +23,14 @@ export async function splitChapters(content: string): Promise<SplitResult> {
   return res.json()
 }
 
-/** 提取小说信息 */
+/** 提取小说信息（支持传入已有元数据进行增量提取） */
 export async function extractInfo(data: {
   chapters: { id: string; title: string; content: string; order: number }[]
   fullContent?: string
+  existingOutline?: string
+  existingCharacters?: Character[]
+  existingRelations?: NovelRelationship[]
+  existingEvents?: Event[]
 }): Promise<ExtractionResult> {
   const res = await fetch(`${BASE}/extract-info`, {
     method: 'POST',
@@ -48,8 +52,12 @@ export async function extractInfo(data: {
 export async function continueWrite(
   data: {
     chapterContent: string
+    previousChapterContent?: string // 上一章内容（新建章节上下文的连续参考）
     outline: string
     requirement?: string
+    characters?: Character[]
+    relationships?: NovelRelationship[]
+    events?: Event[]
   },
   onChunk?: (fullText: string, delta: string) => void,
   signal?: AbortSignal,
@@ -145,8 +153,12 @@ export async function polish(
   data: {
     content: string
     isSelection: boolean
+    previousChapterContent?: string
     outline: string
     requirement?: string
+    characters?: Character[]
+    relationships?: NovelRelationship[]
+    events?: Event[]
   },
   onChunk?: (fullText: string, delta: string) => void,
   signal?: AbortSignal,
@@ -179,8 +191,12 @@ export async function expand(
   data: {
     content: string
     isSelection: boolean
+    previousChapterContent?: string
     outline: string
     requirement?: string
+    characters?: Character[]
+    relationships?: NovelRelationship[]
+    events?: Event[]
   },
   onChunk?: (fullText: string, delta: string) => void,
   signal?: AbortSignal,
