@@ -9,10 +9,10 @@ type Novel struct {
 	ID          string      `json:"id"`
 	Title       string      `json:"title"`
 	Author      string      `json:"author"`
-	CoverPath   string      `json:"coverPath,omitempty"` // 封面图片路径
+	CoverPath   string      `json:"coverPath,omitempty"`   // 封面图片路径
 	Description string      `json:"description,omitempty"` // AI识别或用户填写的小说简介
-	ChapterIDs  []string    `json:"chapterIds"`          // 章节ID有序列表
-	Outline     string      `json:"outline,omitempty"`   // 大纲内容
+	ChapterIDs  []string    `json:"chapterIds"`            // 章节ID有序列表
+	Outline     string      `json:"outline,omitempty"`     // 大纲内容
 	Characters  []Character `json:"characters,omitempty"`
 	Events      []Event     `json:"events,omitempty"`
 	CreatedAt   time.Time   `json:"createdAt"`
@@ -22,11 +22,11 @@ type Novel struct {
 
 // Character 角色信息
 type Character struct {
-	Name         string                 `json:"name"`
-	Description  string                 `json:"description,omitempty"`
-	Alias        string                 `json:"alias,omitempty"`        // 别名
-	Traits       string                 `json:"traits,omitempty"`       // 性格特征
-	Relationships []Relationship        `json:"relationships,omitempty"` // 与其他角色的关系
+	Name          string         `json:"name"`
+	Description   string         `json:"description,omitempty"`
+	Alias         string         `json:"alias,omitempty"`         // 别名
+	Traits        string         `json:"traits,omitempty"`        // 性格特征
+	Relationships []Relationship `json:"relationships,omitempty"` // 与其他角色的关系
 }
 
 // Relationship 角色关系
@@ -38,10 +38,10 @@ type Relationship struct {
 
 // Event 事件信息
 type Event struct {
-	Name        string `json:"name"`
+	Name        string      `json:"name"`
 	Description string      `json:"description,omitempty"`
-	TimeOrder   string `json:"timeOrder,omitempty"` // 时间顺序描述
-	ChapterID   string `json:"chapterId,omitempty"` // 关联章节ID
+	TimeOrder   interface{} `json:"timeOrder,omitempty"` // 时间顺序描述（兼容AI返回字符串或数字）
+	ChapterID   string      `json:"chapterId,omitempty"` // 关联章节ID
 }
 
 // Chapter 章节模型
@@ -58,14 +58,14 @@ type Chapter struct {
 
 // Settings 应用设置
 type Settings struct {
-	NovelPath       string `json:"novelPath"`       // 小说保存路径
-	AIConfigured    bool   `json:"aiConfigured"`    // 是否已配置AI
-	AIModel         string `json:"aiModel"`         // AI模型（默认 deepseek-chat）
-	Endpoint        string `json:"endpoint"`        // AI接口地址
-	APIKey          string `json:"apiKey"`          // API密钥
-	AutoSave        bool   `json:"autoSave"`        // 是否启用自动保存
-	AutoSaveMs      int    `json:"autoSaveMs"`      // 自动保存间隔（毫秒）
-	DefaultFontSize int    `json:"defaultFontSize"` // 默认字号
+	NovelPath          string  `json:"novelPath"`          // 小说保存路径
+	AIConfigured       bool    `json:"aiConfigured"`       // 是否已配置AI
+	AIModel            string  `json:"aiModel"`            // AI模型（默认 deepseek-chat）
+	Endpoint           string  `json:"endpoint"`           // AI接口地址
+	APIKey             string  `json:"apiKey"`             // API密钥
+	AutoSave           bool    `json:"autoSave"`           // 是否启用自动保存
+	AutoSaveMs         int     `json:"autoSaveMs"`         // 自动保存间隔（毫秒）
+	DefaultFontSize    int     `json:"defaultFontSize"`    // 默认字号
 	DefaultLineSpacing float64 `json:"defaultLineSpacing"` // 默认行距
 }
 
@@ -99,9 +99,9 @@ type AIResponse struct {
 
 // Choice API响应的选项
 type Choice struct {
-	Index   int     `json:"index"`
-	Message Message `json:"message"`
-	FinishReason string `json:"finish_reason"`
+	Index        int     `json:"index"`
+	Message      Message `json:"message"`
+	FinishReason string  `json:"finish_reason"`
 }
 
 // Usage Token用量
@@ -141,15 +141,15 @@ type RelationshipEntry struct {
 	Source      string `json:"source"`
 	Target      string `json:"target"`
 	Relation    string `json:"relation"`
-	Description string      `json:"description,omitempty"`
+	Description string `json:"description,omitempty"`
 }
 
 // ExtractedEvent 提取的事件
 type ExtractedEvent struct {
-	Name        string `json:"name"`
-	Description string      `json:"description"`
-	TimeOrder   string `json:"timeOrder"`
-	RelatedChars []string `json:"relatedChars"`
+	Name         string      `json:"name"`
+	Description  string      `json:"description"`
+	TimeOrder    interface{} `json:"timeOrder"` // 时间顺序描述（兼容AI返回字符串或数字）
+	RelatedChars []string    `json:"relatedChars"`
 }
 
 // ChapterSplitRequest 章节拆分请求
