@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref, watch, onUnmounted } from 'vue'
 import {
   NModal, NTabs, NTabPane, NInput, NButton, NSpace, NGrid, NGi,
   NCard, NText, NEmpty, NScrollbar, useMessage,
@@ -25,50 +25,69 @@ const saving = ref(false)
 // 实际使用的小说对象
 const novel = computed(() => props.novel ?? novelStore.currentNovel)
 
-// ------ 本地状态（深拷贝，取消时不丢失原始数据） ------
+// ------ 本地状态（深拷贝，关闭时不丢失原始数据） ------
 const localDescription = ref('')
 const localOutline = ref('')
 const localCharacters = ref<Character[]>([])
 const localEvents = ref<Event[]>([])
 
-// 初始化 / 重置本地状态
-function initLocalState() {
-  if (!novel.value) return
-  const n = novel.value
-  localDescription.value = n.description || ''
-  localOutline.value = n.outline || ''
-  localCharacters.value = JSON.parse(JSON.stringify(n.characters || []))
-  localEvents.value = JSON.parse(JSON.stringify(n.events || []))
-}
+// ------ 自动保存（防抖） ------
+let autoSaveTimer: ReturnType<typeof setTimeout> | null = null
+let initialized = false
 
-watch(() => props.show, (open) => {
-  if (open) initLocalState()
-})
-
-// 保存全部字段
-async function handleSave() {
+async function doAutoSave() {
   if (!novel.value) return
   saving.value = true
-  const ok = await novelStore.updateNovelMeta(novel.value.id, {
-    description: localDescription.value.trim(),
-    outline: localOutline.value.trim(),
+  await novelStore.updateNovelMeta(novel.value.id, {
+    description: localDescription.value.trim() || undefined,
+    outline: localOutline.value.trim() || undefined,
     characters: localCharacters.value,
     events: localEvents.value,
   })
   saving.value = false
-  if (ok) {
-    message.success('小说信息已保存')
-    emit('update:show', false)
-  } else {
-    message.error('保存失败')
-  }
 }
 
-// 关闭确认
-function handleClose() {
-  // 后续可加「有未保存更改」确认提示
-  emit('update:show', false)
+function scheduleAutoSave() {
+  if (!initialized || !props.show) return
+  if (autoSaveTimer) clearTimeout(autoSaveTimer)
+  autoSaveTimer = setTimeout(doAutoSave, 800)
 }
+
+// 初始化 / 重置本地状态
+function initLocalState() {
+  if (!novel.value) return
+  const n = novel.value
+  initialized = false
+  localDescription.value = n.description || ''
+  localOutline.value = n.outline || ''
+  localCharacters.value = JSON.parse(JSON.stringify(n.characters || []))
+  localEvents.value = JSON.parse(JSON.stringify(n.events || []))
+  initialized = true
+}
+
+watch(() => props.show, async (open) => {
+  if (open) {
+    initLocalState()
+  } else {
+    // 关闭时刷 pending 保存
+    if (autoSaveTimer) {
+      clearTimeout(autoSaveTimer)
+      autoSaveTimer = null
+      await doAutoSave()
+    }
+  }
+})
+
+// 各字段变化时自动保存（防抖 800ms）
+watch(localDescription, () => scheduleAutoSave())
+watch(localOutline, () => scheduleAutoSave())
+watch(localEvents, () => scheduleAutoSave(), { deep: true })
+
+
+
+onUnmounted(() => {
+  if (autoSaveTimer) clearTimeout(autoSaveTimer)
+})
 
 // ------ 章节概览数据 ------
 const chapterList = computed(() => novelStore.chapters)
@@ -119,6 +138,7 @@ const totalWords = computed(() =>
         <n-tab-pane name="characters" tab="人物关系图">
           <CharacterGraph
             v-model:characters="localCharacters"
+            :novel-id="novel?.id"
             class="tab-fill"
           />
         </n-tab-pane>
@@ -161,13 +181,6 @@ const totalWords = computed(() =>
       </n-tabs>
     </div>
 
-    <!-- 底部按钮 -->
-    <template #footer>
-      <n-space justify="end">
-        <n-button quaternary @click="handleClose">取消</n-button>
-        <n-button type="primary" :loading="saving" @click="handleSave">保存</n-button>
-      </n-space>
-    </template>
   </n-modal>
 </template>
 
