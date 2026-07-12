@@ -113,7 +113,7 @@ function handleEditDesc(e: MouseEvent) {
       </n-button>
       <n-button text class="action-btn" @click="handleEditDesc">
         <template #icon><n-icon size="15"><DescIcon /></n-icon></template>
-        <span>简介</span>
+        <span>信息</span>
       </n-button>
       <n-button text class="action-btn action-btn-danger" @click="handleDelete">
         <template #icon><n-icon size="15"><DeleteIcon /></n-icon></template>

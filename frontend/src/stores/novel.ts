@@ -1,6 +1,6 @@
 import {defineStore} from 'pinia'
 import {ref} from 'vue'
-import type {Chapter, Novel} from '../types'
+import type {Chapter, Character, Event, Novel} from '../types'
 import * as novelApi from '../api/novel'
 import * as chapterApi from '../api/chapter'
 
@@ -168,12 +168,22 @@ export const useNovelStore = defineStore('novel', () => {
     }
   }
 
-  async function updateNovelMeta(id: string, data: { title?: string; description?: string }): Promise<boolean> {
+  async function updateNovelMeta(id: string, data: {
+    title?: string
+    description?: string
+    outline?: string
+    characters?: Character[]
+    events?: Event[]
+  }): Promise<boolean> {
     try {
       const updated = await novelApi.updateNovel(id, data)
       const idx = novels.value.findIndex(n => n.id === id)
       if (idx !== -1) {
         novels.value[idx] = { ...novels.value[idx], ...updated }
+      }
+      // 同步更新 currentNovel（如果是当前激活的小说）
+      if (currentNovel.value?.id === id) {
+        currentNovel.value = { ...currentNovel.value, ...updated }
       }
       return true
     } catch (e: unknown) {

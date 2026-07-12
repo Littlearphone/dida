@@ -13,6 +13,7 @@ import EditorStatusBar from '../components/editor/EditorStatusBar.vue'
 import AIContinueDialog from '../components/editor/AIContinueDialog.vue'
 import AIEditDialog from '../components/editor/AIEditDialog.vue'
 import AISetupDialog from '../components/editor/AISetupDialog.vue'
+import NovelInfoDialog from '../components/editor/NovelInfoDialog.vue'
 import { EditorContent, useEditor } from '@tiptap/vue-3'
 import { Plugin, PluginKey } from '@tiptap/pm/state'
 import { createDocument } from '@tiptap/core'
@@ -419,6 +420,7 @@ function handleWindowResize() {
 const showContinueWrite = ref(false)
 const showAIEdit = ref(false)
 const showAISetup = ref(false)
+const showNovelInfo = ref(false)
 const aiEditMode = ref<'polish' | 'expand'>('polish')
 /** 续写结果传入 AIEditDialog 二次处理时的待处理文本 */
 const pendingEditContent = ref('')
@@ -556,7 +558,8 @@ onUnmounted(() => {
         @continue="showContinueWrite = true"
         @polish="openAIEdit('polish')"
         @expand="openAIEdit('expand')"
-        @setupAI="showAISetup = true" />
+        @setupAI="showAISetup = true"
+        @showInfo="showNovelInfo = true" />
     </div>
 
     <AIContinueDialog v-model:show="showContinueWrite"
@@ -564,6 +567,7 @@ onUnmounted(() => {
       @expandResult="(t: string) => handleContinueEdit('expand', t)" />
     <AIEditDialog v-model:show="showAIEdit" :mode="aiEditMode" :externalContent="pendingEditContent" />
     <AISetupDialog v-model:show="showAISetup" />
+    <NovelInfoDialog v-model:show="showNovelInfo" />
   </n-layout>
 </template>
 

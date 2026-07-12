@@ -72,6 +72,7 @@ func (h *NovelHandler) HandleUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
+		Title       string             `json:"title,omitempty"`
 		Outline     string             `json:"outline,omitempty"`
 		Description string             `json:"description,omitempty"`
 		Characters  []models.Character `json:"characters,omitempty"`
@@ -82,6 +83,9 @@ func (h *NovelHandler) HandleUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.Title != "" {
+		novel.Title = req.Title
+	}
 	novel.Outline = req.Outline
 	novel.Description = req.Description
 	novel.Characters = req.Characters

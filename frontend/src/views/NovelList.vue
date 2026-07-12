@@ -6,7 +6,7 @@ import NovelCard from '../components/NovelCard.vue'
 import CreateNovelDialog from '../components/novel/CreateNovelDialog.vue'
 import ImportNovelDialog from '../components/novel/ImportNovelDialog.vue'
 import RenameNovelDialog from '../components/novel/RenameNovelDialog.vue'
-import EditDescriptionDialog from '../components/novel/EditDescriptionDialog.vue'
+import NovelInfoDialog from '../components/editor/NovelInfoDialog.vue'
 import DeleteNovelConfirmDialog from '../components/novel/DeleteNovelConfirmDialog.vue'
 import { NButton, NIcon, NText, NEmpty, NSpace, NGrid, NGi, NScrollbar } from 'naive-ui'
 import { AddOutline as AddIcon, DocumentTextOutline as ImportIcon } from '@vicons/ionicons5'
@@ -86,7 +86,7 @@ onMounted(() => { novelStore.loadNovels() })
     <CreateNovelDialog v-model:show="showCreateModal" @created="openNovelEditor" />
     <ImportNovelDialog v-model:show="showImportModal" @imported="openNovelEditor" />
     <RenameNovelDialog v-model:show="showRenameModal" :novel="renameTarget" />
-    <EditDescriptionDialog v-model:show="showEditDescModal" :novel="descTarget" />
+    <NovelInfoDialog v-model:show="showEditDescModal" :novel="descTarget" />
     <DeleteNovelConfirmDialog v-model:show="showDeleteModal" :novel="deleteTarget" />
   </div>
 </template>
