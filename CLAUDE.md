@@ -40,6 +40,22 @@ cd backend && go run .    # 终端2：Go 后端（需要先构建前端）
 - 构建前端前需要 `pnpm install`
 - 生产构建 `dida.exe` 在项目根目录，已加入 `.gitignore`
 
+## 编辑器操作注意事项
+
+### Undo / Redo
+- 使用 `editor.commands.undo()` + `editor.view.focus()` 模式，**不**使用 `chain().focus().undo()` 链式调用
+- `chain().focus()` 会产生多余的 focus 事务干扰 undo 历史追踪，快速连续操作时可能导致选区位置异常（光标跳转到文档末尾）
+- undoable 状态依赖 `hasUserEdited && editor.can().undo()`，前者防止初始加载后 undo 按钮误亮
+
+### 替换操作（replace / replaceAll）
+- 所有替换操作必须使用 `view.dispatch(tr)` 直接派发单次事务，配合 `view.focus()` 恢复焦点
+- `replaceCurrent()` 和 `replaceAll()` 已遵循此模式：创建单次 `state.tr` 后 `view.dispatch(tr)`，避免多余历史记录
+- **禁止**使用 `editor.chain().focus().command(...)` 模式进行替换
+
+### 章节切换前的保存
+- ChapterSidebar 切换章节时通过 `@saveBeforeSwitch` 事件通知父组件执行 `doSave()`
+- 确保切换前有未保存内容时自动触发保存，避免数据丢失
+
 ## AI 编辑对话框关键逻辑
 - `AIEditDialog.vue` — 润色/扩写共用组件，通过 `mode` prop 区分
 - **选中检测**: `checkSelection()` 基于 ProseMirror 选区状态（不受 DOM 焦点影响）
@@ -47,10 +63,18 @@ cd backend && go run .    # 终端2：Go 后端（需要先构建前端）
 - **结果编辑**: 结果展示区使用 `<n-input type="textarea" v-model:value="editResult">`，可直接修改 AI 输出后再替换
 - **选中清除**: 选中预览区提供 X 关闭按钮（`clearSelection()`），可取消选中改用整章内容
 
-## 编辑器替换操作注意事项
-- `replaceSelection` 直接使用 `view.dispatch(tr)` 派发单次事务，配合 `view.focus()`
-- 避免使用 `chain().focus()` 模式进行替换操作（可能因焦点变化产生两次独立事务，导致需要两次 Ctrl+Z 撤销）
-- `insertText` 和 `replaceWith` 均为单步事务操作，适合用于替换场景
+## 组件样式规范
+
+### n-button 自定义样式
+- 当需要高度自定义的 `<n-button>` 样式（如等宽填充按钮），使用 NaiveUI 的 CSS 变量覆盖，而非原生 `<button>`：
+  ```css
+  .custom-btn {
+    --n-text-color: #555 !important;
+    --n-text-color-hover: #333 !important;
+  }
+  ```
+- 对于文本渐显动画（hover 时 max-width 过渡），使用 `:deep(.n-button__content > span:last-child)` 选择器定位按钮文本
+- **CSS 变量优先**: 自定义 NaiveUI 组件样式时优先使用 `--n-*` CSS 变量覆盖，其次使用 `:deep()` 穿透，避免直接覆盖全局类名
 
 ## 开发规则
 

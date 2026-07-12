@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type {Novel} from '../types'
-import {NCard, NIcon, NText} from 'naive-ui'
+import {NCard, NIcon, NButton, NText} from 'naive-ui'
 import {
   CreateOutline as RenameIcon,
   DocumentTextOutline as DescIcon,
@@ -107,18 +107,18 @@ function handleEditDesc(e: MouseEvent) {
 
     <!-- Hover 操作栏（卡片底部，等宽水平按钮） -->
     <div class="action-bar">
-      <button class="action-btn" @click="handleRename">
-        <n-icon size="15"><RenameIcon /></n-icon>
+      <n-button text class="action-btn" @click="handleRename">
+        <template #icon><n-icon size="15"><RenameIcon /></n-icon></template>
         <span>重命名</span>
-      </button>
-      <button class="action-btn" @click="handleEditDesc">
-        <n-icon size="15"><DescIcon /></n-icon>
+      </n-button>
+      <n-button text class="action-btn" @click="handleEditDesc">
+        <template #icon><n-icon size="15"><DescIcon /></n-icon></template>
         <span>简介</span>
-      </button>
-      <button class="action-btn action-btn-danger" @click="handleDelete">
-        <n-icon size="15"><DeleteIcon /></n-icon>
+      </n-button>
+      <n-button text class="action-btn action-btn-danger" @click="handleDelete">
+        <template #icon><n-icon size="15"><DeleteIcon /></n-icon></template>
         <span>删除</span>
-      </button>
+      </n-button>
     </div>
   </n-card>
 </template>
@@ -237,31 +237,38 @@ function handleEditDesc(e: MouseEvent) {
 
   .action-btn {
     flex: 1;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 3px;
     height: 34px;
-    border: none;
-    background: transparent;
-    color: #555;
-    font-size: 12px;
-    cursor: pointer;
-    transition: background 0.12s, color 0.12s;
-    &:not(:last-child) { border-right: 1px solid #eee; }
-    &:hover { background: #f5f5f5; color: #333; }
+    border-radius: 0;
+    /* n-button text 默认样式覆盖 */
+    --n-text-color: #555 !important;
+    --n-text-color-hover: #333 !important;
+    --n-text-color-pressed: #333 !important;
+    &:not(:last-child) {
+      border-right: 1px solid #eee;
+    }
+    &:hover {
+      background: #f5f5f5;
+    }
+    :deep(.n-button__content) {
+      gap: 3px;
+      font-size: 12px;
+      > span:last-child {
+        max-width: 0;
+        overflow: hidden;
+        transition: max-width 0.2s ease;
+        white-space: nowrap;
+        display: inline-block;
+      }
+    }
+    &:hover :deep(.n-button__content > span:last-child) {
+      max-width: 60px;
+    }
   }
 
-  .action-btn span {
-    max-width: 0;
-    overflow: hidden;
-    transition: max-width 0.2s ease;
-    white-space: nowrap;
-    display: inline-block;
-  }
-
-  .action-btn:hover span {
-    max-width: 60px;
+  .action-btn-danger {
+    --n-text-color-hover: #d03050 !important;
+    --n-text-color-pressed: #d03050 !important;
+    &:hover { background: #fff5f5; }
   }
 
   .action-btn-danger:hover { color: #d03050 !important; background: #fff5f5 !important; }

@@ -305,33 +305,30 @@ function findPrev() {
   )
 }
 
-/** 替换当前 */
+/** 替换当前：用单次 transaction 替换匹配文本，避免 chain().focus() 产生多余事务 */
 function replaceCurrent() {
   if (!editor.value || !replaceText.value) return
   const idx = currentMatchIndex.value - 1
   const m = matches[idx]
   if (!m) return
-  editor.value.chain()
-    .focus()
-    .command(({ tr }) => {
-      tr.replaceWith(m.from, m.to, editor.value!.schema.text(replaceText.value))
-      return true
-    })
-    .run()
+  const { state, view } = editor.value
+  const tr = state.tr.replaceWith(m.from, m.to, state.schema.text(replaceText.value))
+  view.dispatch(tr)
+  view.focus()
   nextTick(() => updateSearch())
 }
 
-/** 全部替换 */
+/** 全部替换：从后往前替换，单次 transaction 完成全部操作 */
 function replaceAll() {
   if (!editor.value || !replaceText.value || matches.length === 0) return
+  const { state, view } = editor.value
   const sorted = [...matches].sort((a, b) => b.from - a.from)
-  editor.value.chain()
-    .focus()
-    .command(({ tr }) => {
-      for (const m of sorted) tr.replaceWith(m.from, m.to, editor.value!.schema.text(replaceText.value))
-      return true
-    })
-    .run()
+  const tr = state.tr
+  for (const m of sorted) {
+    tr.replaceWith(m.from, m.to, state.schema.text(replaceText.value))
+  }
+  view.dispatch(tr)
+  view.focus()
   nextTick(() => updateSearch())
 }
 
@@ -488,7 +485,7 @@ onUnmounted(() => {
 
 <template>
   <n-layout has-sider style="height: 100vh">
-    <ChapterSidebar v-model:siderCollapsed="siderCollapsed" @goBack="goBack" />
+    <ChapterSidebar v-model:siderCollapsed="siderCollapsed" @goBack="goBack" @saveBeforeSwitch="doSave" />
 
     <div class="main-area">
       <EditorToolbar

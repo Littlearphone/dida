@@ -16,14 +16,16 @@ defineProps<{ siderCollapsed: boolean }>()
 const emit = defineEmits<{
   'update:siderCollapsed': [v: boolean]
   goBack: []
+  /** 切换章节前通知父组件保存当前章节内容 */
+  saveBeforeSwitch: []
 }>()
 
 const novelStore = useNovelStore()
 const message = useMessage()
 
-// === 章节选择 ===
+// === 章节选择：切换前通知父组件保存当前内容 ===
 function selectChapter(chapter: Chapter) {
-  if (contentChanged.value) saveCurrentChapter()
+  emit('saveBeforeSwitch')
   novelStore.selectChapter(chapter)
 }
 
@@ -64,16 +66,6 @@ function onMenuGlobalClose(e: Event) {
   if (!contextMenuShow.value) return
   if (e.type === 'keydown' && (e as KeyboardEvent).key !== 'Escape') return
   closeContextMenu()
-}
-
-// === 自动保存（章节切换时） ===
-const contentChanged = ref(false)
-
-async function saveCurrentChapter() {
-  const ch = novelStore.currentChapter
-  if (!ch || !contentChanged.value) return
-  const ok = await novelStore.updateChapter(ch.id, { content: '' })
-  if (ok) contentChanged.value = false
 }
 
 // === 添加章节 ===

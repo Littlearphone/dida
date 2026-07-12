@@ -20,8 +20,8 @@ export const useNovelStore = defineStore('novel', () => {
     error.value = null
     try {
       novels.value = await novelApi.fetchNovels()
-    } catch (e: any) {
-      error.value = e.message
+    } catch (e: unknown) {
+      error.value = e instanceof Error ? e.message : String(e)
     } finally {
       loading.value = false
     }
@@ -32,8 +32,8 @@ export const useNovelStore = defineStore('novel', () => {
       const novel = await novelApi.createNovel(title, author)
       novels.value.unshift(novel)
       return novel
-    } catch (e: any) {
-      error.value = e.message
+    } catch (e: unknown) {
+      error.value = e instanceof Error ? e.message : String(e)
       return null
     }
   }
@@ -48,8 +48,8 @@ export const useNovelStore = defineStore('novel', () => {
         currentChapter.value = null
       }
       return true
-    } catch (e: any) {
-      error.value = e.message
+    } catch (e: unknown) {
+      error.value = e instanceof Error ? e.message : String(e)
       return false
     }
   }
@@ -67,16 +67,16 @@ export const useNovelStore = defineStore('novel', () => {
   async function loadChapters(novelId: string) {
     try {
       chapters.value = await novelApi.getChapters(novelId)
-    } catch (e: any) {
-      error.value = e.message
+    } catch (e: unknown) {
+      error.value = e instanceof Error ? e.message : String(e)
     }
   }
 
   async function loadChapter(id: string) {
     try {
       currentChapter.value = await chapterApi.getChapter(id)
-    } catch (e: any) {
-      error.value = e.message
+    } catch (e: unknown) {
+      error.value = e instanceof Error ? e.message : String(e)
     }
   }
 
@@ -99,8 +99,8 @@ export const useNovelStore = defineStore('novel', () => {
         novel.chapterIds.push(ch.id)
       }
       return ch
-    } catch (e: any) {
-      error.value = e.message
+    } catch (e: unknown) {
+      error.value = e instanceof Error ? e.message : String(e)
       return null
     }
   }
@@ -112,8 +112,8 @@ export const useNovelStore = defineStore('novel', () => {
       if (idx !== -1) chapters.value[idx] = updated
       if (currentChapter.value?.id === id) currentChapter.value = updated
       return true
-    } catch (e: any) {
-      error.value = e.message
+    } catch (e: unknown) {
+      error.value = e instanceof Error ? e.message : String(e)
       return false
     }
   }
@@ -125,8 +125,8 @@ export const useNovelStore = defineStore('novel', () => {
       if (idx !== -1) chapters.value[idx] = updated
       if (currentChapter.value?.id === id) currentChapter.value = updated
       return true
-    } catch (e: any) {
-      console.warn('自动保存失败:', e.message)
+    } catch (e: unknown) {
+      console.warn('自动保存失败:', e instanceof Error ? e.message : e)
       return false
     }
   }
@@ -137,8 +137,8 @@ export const useNovelStore = defineStore('novel', () => {
       chapters.value = chapters.value.filter(c => c.id !== id)
       if (currentChapter.value?.id === id) currentChapter.value = null
       return true
-    } catch (e: any) {
-      error.value = e.message
+    } catch (e: unknown) {
+      error.value = e instanceof Error ? e.message : String(e)
       return false
     }
   }
@@ -152,8 +152,8 @@ export const useNovelStore = defineStore('novel', () => {
       const novel = await novelApi.importNovel(data)
       novels.value.unshift(novel)
       return novel
-    } catch (e: any) {
-      error.value = e.message
+    } catch (e: unknown) {
+      error.value = e instanceof Error ? e.message : String(e)
       return null
     }
   }
@@ -162,8 +162,8 @@ export const useNovelStore = defineStore('novel', () => {
     try {
       await novelApi.reorderChapters(novelId, chapterIds)
       return true
-    } catch (e: any) {
-      error.value = e.message
+    } catch (e: unknown) {
+      error.value = e instanceof Error ? e.message : String(e)
       return false
     }
   }
@@ -176,8 +176,8 @@ export const useNovelStore = defineStore('novel', () => {
         novels.value[idx] = { ...novels.value[idx], ...updated }
       }
       return true
-    } catch (e: any) {
-      error.value = e.message
+    } catch (e: unknown) {
+      error.value = e instanceof Error ? e.message : String(e)
       return false
     }
   }
