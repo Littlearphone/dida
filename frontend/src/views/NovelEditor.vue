@@ -124,6 +124,8 @@ async function handlePostInsertExtract() {
   const ch = currentChapter.value
   if (!ch) return
 
+  extractLoading.value = true
+  const loadingMsg = message.loading('正在提取章节元数据...', { duration: 0 })
   try {
     const result = await aiApi.extractInfo({
       chapters: [{
@@ -137,11 +139,16 @@ async function handlePostInsertExtract() {
       existingRelations: n.relationships,
       existingEvents: n.events,
     })
+    loadingMsg.destroy()
     showExtractResult.value = true
     extractResult.value = result
   } catch (e: unknown) {
-    // 静默失败：提取是辅助功能，不影响主流程
+    loadingMsg.destroy()
+    // 静默失败：提取是辅助功能，不影响主流程，但至少提示用户
     console.warn('AI 提取元数据失败:', e instanceof Error ? e.message : e)
+    message.warning('AI 元数据提取未完成，不影响已有内容')
+  } finally {
+    extractLoading.value = false
   }
 }
 
@@ -163,6 +170,7 @@ async function handleExtractSupplement() {
   if (!contentToExtract) { message.warning('内容为空'); return }
 
   extractLoading.value = true
+  const loadingMsg = message.loading('正在提取元数据，请稍候...', { duration: 0 })
   try {
     const result = await aiApi.extractInfo({
       chapters: [{
@@ -176,9 +184,11 @@ async function handleExtractSupplement() {
       existingRelations: n.relationships,
       existingEvents: n.events,
     })
+    loadingMsg.destroy()
     showExtractResult.value = true
     extractResult.value = result
   } catch (e: unknown) {
+    loadingMsg.destroy()
     const msg = e instanceof Error ? e.message : String(e)
     // 后端 JSON 解析错误通常是 AI 返回格式不符合要求，给更友好的提示
     if (msg.includes('JSON') || msg.includes('json') || msg.includes('格式')) {
