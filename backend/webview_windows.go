@@ -52,6 +52,11 @@ func createWebViewWindow(frontendURL string) {
 	w.SetTitle("AI 小说编辑器")
 	w.SetSize(960, 640, webview2.HintMin)
 
+	// 暴露 JS 接口：允许前端修改窗口标题（进入小说时显示小说名）
+	w.Bind("setWindowTitle", func(title string) {
+		w.SetTitle(title)
+	})
+
 	// 导航到前端地址
 	w.Navigate(frontendURL)
 

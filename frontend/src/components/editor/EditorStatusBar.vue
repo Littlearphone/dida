@@ -1,8 +1,11 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { NButton, NText, NSpace } from 'naive-ui'
 import { SparklesOutline as SparklesIcon, ColorWandOutline as WandIcon, CreateOutline as ExpandIcon, SettingsOutline as AISetupIcon } from '@vicons/ionicons5'
 
-defineProps<{ wordCount: number; aiConfigured: boolean }>()
+const props = defineProps<{ wordCount: number; aiConfigured: boolean; contentChanged: boolean }>()
+const saveLabel = computed(() => props.contentChanged ? '未保存' : '已保存')
+const saveColor = computed(() => props.contentChanged ? '#e6a23c' : '#18a058')
 
 const emit = defineEmits<{
   continue: []
@@ -15,6 +18,7 @@ const emit = defineEmits<{
 <template>
   <div style="border-top: 1px solid #eee; padding: 6px 16px; display: flex; align-items: center; gap: 8px; flex-shrink: 0;">
     <n-text depth="3" style="font-size: 12px;">共 {{ wordCount }} 字</n-text>
+    <n-text :style="{ fontSize: '12px', color: saveColor, marginLeft: '12px' }">{{ saveLabel }}</n-text>
     <div style="flex: 1" />
     <template v-if="aiConfigured">
       <n-button size="small" type="primary" @click="emit('continue')">

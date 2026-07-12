@@ -6,6 +6,7 @@ import { useSettingsStore } from '../stores/settings'
 import { EDITOR_ACTIONS_KEY } from '../types/editor'
 import { useEditorAppearance } from '../composables/useEditorAppearance'
 import { useAutoSave } from '../composables/useAutoSave'
+import { setWindowTitle } from '../utils/windowTitle'
 import ChapterSidebar from '../components/editor/ChapterSidebar.vue'
 import EditorToolbar from '../components/editor/EditorToolbar.vue'
 import EditorStatusBar from '../components/editor/EditorStatusBar.vue'
@@ -70,12 +71,21 @@ provide(EDITOR_ACTIONS_KEY, {
     if (!editor.value) return
     const { state, view } = editor.value
     const { from, to } = state.selection
-    // 直接构造并派发单次事务，避免 chain().focus() 产生两次独立事务
-    const tr = from === to
-      ? state.tr.insertText(text, state.doc.content.size)
-      : state.tr.replaceWith(from, to, state.schema.text(text))
-    view.dispatch(tr)
+    if (from === to) {
+      // 无选区时在文档末尾追加，用 insertContentAt 解析 HTML 保留段落
+      editor.value.commands.insertContentAt(state.doc.content.size, toTiptapHtml(text))
+    } else {
+      // 有选区时替换，用 insertContentAt 解析 HTML 保留换行分段
+      editor.value.commands.insertContentAt({ from, to }, toTiptapHtml(text))
+    }
     view.focus()
+    contentChanged.value = true
+  },
+  appendContent: (text: string) => {
+    if (!editor.value) return
+    // 将纯文本转换为段落 HTML 后在文档末尾插入，保留分段
+    const html = toTiptapHtml(text)
+    editor.value.commands.insertContentAt(editor.value.state.doc.content.size, html)
     contentChanged.value = true
   },
 })
@@ -131,6 +141,8 @@ watch(currentChapter, (ch) => {
 
 // === 返回小说列表 ===
 function goBack() {
+  // 退出时恢复默认窗口标题
+  setWindowTitle('AI 小说编辑器')
   const go = () => { novelStore.selectNovel(null); router.push({ name: 'NovelList' }) }
   if (contentChanged.value) doSave().then(go)
   else go()
@@ -355,6 +367,13 @@ function handleKeydown(e: KeyboardEvent) {
     return
   }
 
+  // Ctrl+S：手动保存当前章节
+  if (isCtrl && e.key === 's') {
+    e.preventDefault()
+    doSave()
+    return
+  }
+
   if (!showSearch.value) return
 
   // F3 / Ctrl+G / Enter（搜索框内）：下一个 / Shift+上一个
@@ -382,9 +401,19 @@ const showContinueWrite = ref(false)
 const showAIEdit = ref(false)
 const showAISetup = ref(false)
 const aiEditMode = ref<'polish' | 'expand'>('polish')
+/** 续写结果传入 AIEditDialog 二次处理时的待处理文本 */
+const pendingEditContent = ref('')
 const aiConfigured = computed(() => settingsStore.settings?.aiConfigured ?? false)
 
 function openAIEdit(mode: 'polish' | 'expand') {
+  aiEditMode.value = mode
+  pendingEditContent.value = ''
+  showAIEdit.value = true
+}
+
+/** 从续写结果进入二次处理（润色/扩写） */
+function handleContinueEdit(mode: 'polish' | 'expand', text: string) {
+  pendingEditContent.value = text
   aiEditMode.value = mode
   showAIEdit.value = true
 }
@@ -397,6 +426,8 @@ onMounted(async () => {
   const n = novelStore.novels.find(n => n.id === novelId)
   if (n) {
     novelStore.selectNovel(n)
+    // 进入小说时设置窗口标题为小说名
+    setWindowTitle(n.title)
     await novelStore.loadChapters(n.id)
     if (novelStore.chapters.length > 0) {
       novelStore.selectChapter(novelStore.chapters[0])
@@ -422,6 +453,8 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  // 退出编辑器时恢复默认窗口标题
+  setWindowTitle('AI 小说编辑器')
   editor.value?.destroy()
   if (searchPlugin) editor.value?.unregisterPlugin(searchPluginKey)
   document.removeEventListener('keydown', handleKeydown)
@@ -442,7 +475,7 @@ onUnmounted(() => {
         :isBold="isBold" :isItalic="isItalic" :fontFamily="fontFamily"
         :showSearch="showSearch" :canFormat="canFormat"
         :fontOptions="fontOptions"
-        :contentChanged="contentChanged" :showSavedIndicator="showSavedIndicator"
+        :contentChanged="contentChanged"
         :autoSaveEnabled="!!settingsStore.settings?.autoSave"
         @undo="undo" @redo="redo"
         @update:fontSize="fontSize = $event" @update:lineHeight="lineHeight = $event"
@@ -500,15 +533,17 @@ onUnmounted(() => {
       </div>
 
       <EditorStatusBar
-        :wordCount="wordCount" :aiConfigured="aiConfigured"
+        :wordCount="wordCount" :aiConfigured="aiConfigured" :contentChanged="contentChanged"
         @continue="showContinueWrite = true"
         @polish="openAIEdit('polish')"
         @expand="openAIEdit('expand')"
         @setupAI="showAISetup = true" />
     </div>
 
-    <AIContinueDialog v-model:show="showContinueWrite" />
-    <AIEditDialog v-model:show="showAIEdit" :mode="aiEditMode" />
+    <AIContinueDialog v-model:show="showContinueWrite"
+      @polishResult="(t: string) => handleContinueEdit('polish', t)"
+      @expandResult="(t: string) => handleContinueEdit('expand', t)" />
+    <AIEditDialog v-model:show="showAIEdit" :mode="aiEditMode" :externalContent="pendingEditContent" />
     <AISetupDialog v-model:show="showAISetup" />
   </n-layout>
 </template>

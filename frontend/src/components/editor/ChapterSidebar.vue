@@ -210,9 +210,6 @@ onUnmounted(() => {
           <n-icon size="22"><BackIcon /></n-icon>
           <span class="back-label">返回</span>
         </div>
-        <n-text class="header-title" :title="novelStore.currentNovel?.title">
-          {{ novelStore.currentNovel?.title || '加载中...' }}
-        </n-text>
       </div>
       <n-divider v-if="!siderCollapsed" style="margin: 8px 0" />
       <n-scrollbar style="flex: 1;">
@@ -316,18 +313,14 @@ onUnmounted(() => {
   height: 100%; display: flex; flex-direction: column; min-height: 0;
   overflow: hidden; /* 防止伸缩时内容被挤压形变 */
   .chapter-header {
-    padding: 14px 16px; display: flex; align-items: center; gap: 10px; flex-shrink: 0;
+    padding: 8px 12px; display: flex; align-items: center; flex-shrink: 0;
     border-bottom: 1px solid #eee; background: #fff;
     .header-back-btn {
       display: flex; align-items: center; gap: 4px; padding: 6px 12px; border-radius: 8px;
-      cursor: pointer; color: #666; transition: all 0.2s; user-select: none; flex-shrink: 0;
+      cursor: pointer; color: #666; transition: all 0.2s; user-select: none;
       &:hover { background: #f0f0f0; color: #333; }
       &:active { background: #e8e8e8; }
       .back-label { font-size: 13px; }
-    }
-    .header-title {
-      font-size: 16px; font-weight: 600; overflow: hidden; text-overflow: ellipsis;
-      white-space: nowrap; color: #333;
     }
   }
   .chapter-footer { padding: 8px; flex-shrink: 0; border-top: 1px solid #eee; }
@@ -355,8 +348,7 @@ onUnmounted(() => {
     }
   }
   &.collapsed {
-    .chapter-header { justify-content: center; padding: 12px 0;
-      .header-title { display: none; }
+    .chapter-header { justify-content: center; padding: 10px 0;
       .back-label { display: none; }
     }
     .chapter-list { padding: 0; }

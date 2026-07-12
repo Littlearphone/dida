@@ -13,7 +13,7 @@ defineProps<{
   showSearch: boolean
   canFormat: boolean
   fontOptions: { label: string; value: string }[]
-  contentChanged: boolean; showSavedIndicator: boolean
+  contentChanged: boolean
   autoSaveEnabled: boolean
 }>()
 
@@ -160,12 +160,6 @@ const emit = defineEmits<{
         </n-tooltip>
       </template>
     </div>
-    <div class="toolbar-status">
-      <n-text v-if="contentChanged || showSavedIndicator"
-        :style="{ fontSize: '12px', color: contentChanged ? '#e6a23c' : '#18a058' }">
-        {{ contentChanged ? '未保存' : '已保存' }}
-      </n-text>
-    </div>
   </div>
 </template>
 
@@ -190,10 +184,6 @@ const emit = defineEmits<{
 :deep(.n-divider--vertical) {
   margin: 0 1px !important;
   width: 1px !important;
-}
-.toolbar-status {
-  flex-shrink: 0;
-  margin-left: 12px;
 }
 .ctrl-value {
   font-size: 12px;

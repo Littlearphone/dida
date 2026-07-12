@@ -1,13 +1,22 @@
 <script setup lang="ts">
 import { ref, inject, onUnmounted } from 'vue'
 import { NModal, NAlert, NForm, NFormItem, NInput, NButton, NSpace, NIcon, NProgress, useMessage } from 'naive-ui'
-import { CopyOutline as CopyIcon, ArrowDownOutline as InsertIcon, AddCircleOutline as NewChapterIcon } from '@vicons/ionicons5'
+import {
+  CopyOutline as CopyIcon, ArrowDownOutline as InsertIcon,
+  AddCircleOutline as NewChapterIcon,
+  ColorWandOutline as PolishIcon, CreateOutline as ExpandIcon,
+} from '@vicons/ionicons5'
 import { useNovelStore } from '../../stores/novel'
 import * as aiApi from '../../api/ai'
 import { EDITOR_ACTIONS_KEY } from '../../types/editor'
 
 defineProps<{ show: boolean }>()
-const emit = defineEmits<{ 'update:show': [value: boolean] }>()
+const emit = defineEmits<{
+  'update:show': [value: boolean]
+  /** 对续写结果进行二次处理（润色/扩写） */
+  'polishResult': [text: string]
+  'expandResult': [text: string]
+}>()
 
 const novelStore = useNovelStore()
 const message = useMessage()
@@ -21,6 +30,10 @@ const generateProgress = ref(0) // 模拟进度 0-100
 const generateStatus = ref('') // 当前状态文字
 // 用于取消流式请求的 AbortController
 let abortController: AbortController | null = null
+/** 自动重试：AI 返回空内容时自动重试 */
+const MAX_RETRIES = 2
+let retries = 0
+let cancelRequested = false
 
 /** 模拟进度的定时器，让进度条平滑递增到 90% */
 let progressTimer: ReturnType<typeof setInterval> | null = null
@@ -53,60 +66,99 @@ function stopProgressSimulation() {
 async function handleContinueWrite() {
   if (!novelStore.currentChapter) return
   continueLoading.value = true
-  continueResult.value = ''
+  retries = 0
+  cancelRequested = false
   showContinueResult.value = true
 
-  // 创建 AbortController 用于取消请求
-  abortController = new AbortController()
-  startProgressSimulation()
-
-  try {
-    // 流式续写：onChunk 回调实时更新内容和进度
-    const fullText = await aiApi.continueWrite(
-      {
-        chapterContent: novelStore.currentChapter.content,
-        outline: novelStore.currentNovel?.outline || '',
-        requirement: continueRequirement.value,
-      },
-      (fullText: string) => {
-        // 更新显示内容
-        continueResult.value = fullText
-        // 有内容到达说明 AI 正在生成，进度快进到 95%
-        if (generateProgress.value < 95) {
-          generateProgress.value = Math.max(generateProgress.value, 70)
-          generateStatus.value = 'AI 正在生成内容...'
-        }
-      },
-      abortController.signal,
-    )
-    // 流完成，内容已累积完毕
-    continueResult.value = fullText
-    generateProgress.value = 100
-    generateStatus.value = '续写完成'
-    stopProgressSimulation()
-  } catch (e: any) {
-    stopProgressSimulation()
-    // 用户取消不报错
-    if (e.name === 'AbortError') {
-      message.info('已取消续写')
+  while (retries <= MAX_RETRIES) {
+    if (cancelRequested) {
       closeDialog()
       return
     }
-    message.error(`续写失败: ${e.message}`)
-    // 如果已经有部分内容，保留以便用户复制
-    if (!continueResult.value) {
-      showContinueResult.value = false
+
+    // 每次尝试清除上次残留内容
+    continueResult.value = ''
+    generateProgress.value = 0
+
+    if (retries > 0) {
+      generateStatus.value = `续写返回为空，自动重试 (${retries}/${MAX_RETRIES})...`
     } else {
-      generateProgress.value = 100
-      generateStatus.value = '续写出错（已保留部分内容）'
+      generateStatus.value = '正在准备续写请求...'
     }
-  } finally {
-    continueLoading.value = false
-    abortController = null
+
+    abortController = new AbortController()
+    startProgressSimulation()
+
+    try {
+      // 流式续写：onChunk 回调实时更新内容和进度
+      const fullText = await aiApi.continueWrite(
+        {
+          chapterContent: novelStore.currentChapter.content,
+          outline: novelStore.currentNovel?.outline || '',
+          requirement: continueRequirement.value,
+        },
+        (fullText: string) => {
+          continueResult.value = fullText
+          if (generateProgress.value < 95) {
+            generateProgress.value = Math.max(generateProgress.value, 70)
+            generateStatus.value = 'AI 正在生成内容...'
+          }
+        },
+        abortController.signal,
+      )
+      stopProgressSimulation()
+
+      if (fullText) {
+        // 成功获取内容
+        continueResult.value = fullText
+        generateProgress.value = 100
+        generateStatus.value = '续写完成'
+        continueLoading.value = false
+        abortController = null
+        return
+      }
+
+      // 返回空内容 → 重试
+      retries++
+
+    } catch (e: any) {
+      stopProgressSimulation()
+      if (e.name === 'AbortError') {
+        // 取消时不弹提示
+        closeDialog()
+        return
+      }
+
+      // 请求出错，还有重试次数则继续
+      if (retries < MAX_RETRIES && !cancelRequested) {
+        retries++
+        generateStatus.value = `续写出错，自动重试 (${retries}/${MAX_RETRIES})...`
+        continue
+      }
+
+      // 重试用完，报错（如有部分内容则保留）
+      message.error(`续写失败: ${e.message}`)
+      if (!continueResult.value) {
+        showContinueResult.value = false
+      } else {
+        generateProgress.value = 100
+        generateStatus.value = '续写出错（已保留部分内容）'
+      }
+      continueLoading.value = false
+      abortController = null
+      return
+    }
   }
+
+  // 自动重试用完仍为空
+  message.warning('AI 连续返回空内容，续写失败')
+  showContinueResult.value = false
+  continueLoading.value = false
+  abortController = null
 }
 
 function cancelContinue() {
+  cancelRequested = true
   if (abortController) {
     abortController.abort()
   }
@@ -114,8 +166,8 @@ function cancelContinue() {
 
 function insertToChapterEnd() {
   if (!novelStore.currentChapter) return
-  const current = editorActions.getContent?.() || novelStore.currentChapter.content
-  editorActions.setContent(current + '\n\n' + continueResult.value)
+  // 使用 appendContent 将续写文本转段落后追加到文档末尾，避免 HTML+纯文本拼接丢失换行分段
+  editorActions.appendContent?.(continueResult.value)
   closeDialog()
   message.success('已插入到章节末尾')
 }
@@ -203,6 +255,13 @@ onUnmounted(() => {
         <template v-else>
           <n-button quaternary @click="copyResult">
             <template #icon><n-icon><CopyIcon/></n-icon></template>复制
+          </n-button>
+          <!-- 二次处理：将续写结果送入润色或扩写 -->
+          <n-button secondary @click="emit('polishResult', continueResult)" :disabled="!continueResult">
+            <template #icon><n-icon><PolishIcon/></n-icon></template>润色
+          </n-button>
+          <n-button secondary @click="emit('expandResult', continueResult)" :disabled="!continueResult">
+            <template #icon><n-icon><ExpandIcon/></n-icon></template>扩写
           </n-button>
           <n-button quaternary @click="insertToChapterEnd">
             <template #icon><n-icon><InsertIcon/></n-icon></template>插入当前章节末尾

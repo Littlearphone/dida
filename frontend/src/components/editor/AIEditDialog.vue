@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, inject, watch, onUnmounted } from 'vue'
+import { ref, inject, watch, computed, onUnmounted } from 'vue'
 import {
   NModal, NAlert, NForm, NFormItem, NInput, NButton, NGrid, NGi,
   NSpace, NIcon, NProgress, useMessage,
@@ -12,6 +12,8 @@ import { EDITOR_ACTIONS_KEY } from '../../types/editor'
 const props = defineProps<{
   show: boolean
   mode: 'polish' | 'expand'
+  /** 外部传入待处理内容（如续写结果的二次处理），此时不再使用编辑器选区/章节内容 */
+  externalContent?: string
 }>()
 const emit = defineEmits<{ 'update:show': [value: boolean] }>()
 
@@ -34,6 +36,10 @@ const savedSelectionText = ref('')
 
 let abortController: AbortController | null = null
 let progressTimer: ReturnType<typeof setInterval> | null = null
+/** 自动重试：当 AI 返回空内容或请求出错时自动重试 */
+const MAX_RETRIES = 2
+let retries = 0
+let cancelRequested = false
 
 /** 清理 AI 请求相关资源 */
 function cleanupRequest() {
@@ -54,13 +60,22 @@ function resetState() {
   progressText.value = ''
 }
 
-const title = props.mode === 'polish' ? 'AI 润色' : 'AI 扩写'
-const resultLabel = props.mode === 'polish' ? '润色后' : '扩写后'
+const title = computed(() => props.mode === 'polish' ? 'AI 润色' : 'AI 扩写')
+const resultLabel = computed(() => props.mode === 'polish' ? '润色后' : '扩写后')
 
 // 弹框打开时通过编辑器保存选中文本（基于 ProseMirror 选区，不受焦点影响）
 function checkSelection() {
   savedSelectionText.value = editorActions.getSelectionText?.()?.trim() || ''
   hasSelection.value = !!savedSelectionText.value
+}
+
+/** 使用外部传入内容作为处理对象（如续写结果的二次处理） */
+function useExternalContent(text: string) {
+  savedSelectionText.value = text
+  hasSelection.value = true
+  originalContent.value = text
+  editResult.value = ''
+  showResult.value = false
 }
 
 /** 清除选中状态，改为使用整章内容 */
@@ -95,6 +110,9 @@ function stopProgressSimulation() {
 
 async function handleEdit() {
   loading.value = true
+  retries = 0
+  cancelRequested = false
+
   // 使用弹框打开时保存的选中文本，或整章内容
   originalContent.value = savedSelectionText.value
     ? savedSelectionText.value
@@ -103,52 +121,98 @@ async function handleEdit() {
   editResult.value = ''
   showResult.value = true
 
-  abortController = new AbortController()
-  startProgressSimulation()
+  const apiFn = props.mode === 'polish' ? aiApi.polish : aiApi.expand
+  const modeLabel = props.mode === 'polish' ? '润色' : '扩写'
 
-  try {
-    const apiFn = props.mode === 'polish' ? aiApi.polish : aiApi.expand
-    const fullText = await apiFn(
-      {
-        content: originalContent.value,
-        isSelection: !!savedSelectionText.value,
-        outline: novelStore.currentNovel?.outline || '',
-        requirement: requirement.value,
-      },
-      (fullText: string) => {
-        editResult.value = fullText
-        if (progress.value < 95) {
-          progress.value = Math.max(progress.value, 70)
-          progressText.value = `AI 正在${props.mode === 'polish' ? '润色' : '扩写'}...`
-        }
-      },
-      abortController.signal,
-    )
-    editResult.value = fullText
-    progress.value = 100
-    progressText.value = `${props.mode === 'polish' ? '润色' : '扩写'}完成`
-    stopProgressSimulation()
-  } catch (e: any) {
-    stopProgressSimulation()
-    if (e.name === 'AbortError') {
-      message.info('已取消')
+  while (retries <= MAX_RETRIES) {
+    if (cancelRequested) {
       closeDialog()
       return
     }
-    message.error(`${props.mode === 'polish' ? '润色' : '扩写'}失败: ${e.message}`)
-    if (!editResult.value) {
-      showResult.value = false
+
+    // 每次尝试开始时清除上次残留内容
+    editResult.value = ''
+    progress.value = 0
+
+    if (retries > 0) {
+      progressText.value = `${modeLabel}返回为空，自动重试 (${retries}/${MAX_RETRIES})...`
     } else {
-      progress.value = 100
-      progressText.value = `${props.mode === 'polish' ? '润色' : '扩写'}出错（已保留部分内容）`
+      progressText.value = `正在准备${modeLabel}请求...`
     }
-  } finally {
-    loading.value = false
-    abortController = null
+
+    abortController = new AbortController()
+    startProgressSimulation()
+
+    try {
+      const fullText = await apiFn(
+        {
+          content: originalContent.value,
+          isSelection: !!savedSelectionText.value,
+          outline: novelStore.currentNovel?.outline || '',
+          requirement: requirement.value,
+        },
+        (fullText: string) => {
+          editResult.value = fullText
+          if (progress.value < 95) {
+            progress.value = Math.max(progress.value, 70)
+            progressText.value = `AI 正在${modeLabel}...`
+          }
+        },
+        abortController.signal,
+      )
+      stopProgressSimulation()
+
+      if (fullText) {
+        // 成功拿到内容
+        editResult.value = fullText
+        progress.value = 100
+        progressText.value = `${modeLabel}完成`
+        loading.value = false
+        abortController = null
+        return
+      }
+
+      // 返回空内容 → 重试
+      retries++
+
+    } catch (e: any) {
+      stopProgressSimulation()
+      if (e.name === 'AbortError') {
+        // 取消或关闭时不弹提示
+        closeDialog()
+        return
+      }
+
+      // 请求出错，还有重试次数则继续
+      if (retries < MAX_RETRIES && !cancelRequested) {
+        retries++
+        progressText.value = `${modeLabel}出错，自动重试 (${retries}/${MAX_RETRIES})...`
+        continue
+      }
+
+      // 重试用完，报错
+      message.error(`${modeLabel}失败: ${e.message}`)
+      if (!editResult.value) {
+        showResult.value = false
+      } else {
+        progress.value = 100
+        progressText.value = `${modeLabel}出错（已保留部分内容）`
+      }
+      loading.value = false
+      abortController = null
+      return
+    }
   }
+
+  // 自动重试用完仍为空
+  message.warning(`AI 连续返回空内容，${modeLabel}失败`)
+  showResult.value = false
+  loading.value = false
+  abortController = null
 }
 
 function cancelEdit() {
+  cancelRequested = true
   if (abortController) {
     abortController.abort()
   }
@@ -183,7 +247,12 @@ function closeDialog() {
 // 弹框打开时检测选中状态；关闭时重置状态（覆盖 Escape 等非按钮关闭途径）
 watch(() => props.show, (open) => {
   if (open) {
-    checkSelection()
+    if (props.externalContent) {
+      // 外部传入内容（续写二次处理）覆盖编辑器选区
+      useExternalContent(props.externalContent)
+    } else {
+      checkSelection()
+    }
   } else {
     cleanupRequest()
     resetState()
@@ -201,13 +270,14 @@ onUnmounted(() => {
     :mask-closable="false" draggable @update:show="emit('update:show', $event)">
     <!-- 输入阶段：包裹在 div 中以匹配全局 CSS ".n-card-content > div" -->
     <div v-if="!showResult" style="display: flex; flex-direction: column; flex: 1; min-height: 0;">
-      <!-- 有选中时显示提示和选中内容预览（可关闭取消选中） -->
+      <!-- 有选中时显示提示和选中内容预览（可关闭取消选中，外部传入内容时禁用） -->
       <div v-if="hasSelection" style="flex-shrink: 0; margin-bottom: 12px">
         <n-alert type="info" :bordered="false" style="line-height: 1.6;">
           <template #header>
             <div style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
-              <span>当前选中内容将被{{ mode === 'polish' ? '润色' : '扩写' }}</span>
-              <n-button tertiary circle size="tiny" @click.stop="clearSelection" title="取消选中，改用整章内容">
+              <span v-if="externalContent">将对外部内容进行{{ mode === 'polish' ? '润色' : '扩写' }}</span>
+              <span v-else>当前选中内容将被{{ mode === 'polish' ? '润色' : '扩写' }}</span>
+              <n-button v-if="!externalContent" tertiary circle size="tiny" @click.stop="clearSelection" title="取消选中，改用整章内容">
                 <template #icon><n-icon size="14"><CloseIcon/></n-icon></template>
               </n-button>
             </div>

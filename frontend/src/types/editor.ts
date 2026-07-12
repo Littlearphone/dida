@@ -9,6 +9,8 @@ export interface EditorActions {
   getSelectionText?: () => string
   /** 将当前选区替换为指定文本 */
   replaceSelection?: (text: string) => void
+  /** 将纯文本解析为段落后追加到文档末尾 */
+  appendContent?: (text: string) => void
 }
 
 export const EDITOR_ACTIONS_KEY: InjectionKey<EditorActions> = Symbol('editorActions')
