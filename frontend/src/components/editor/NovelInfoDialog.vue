@@ -5,7 +5,7 @@ import {
   NCard, NText, NEmpty, NScrollbar, useMessage,
 } from 'naive-ui'
 import { useNovelStore } from '../../stores/novel'
-import type { Novel, Character, Event } from '../../types'
+import type { Novel, Character, Event, NovelRelationship } from '../../types'
 import CharacterGraph from './CharacterGraph.vue'
 import EventTimeline from './EventTimeline.vue'
 
@@ -29,6 +29,7 @@ const novel = computed(() => props.novel ?? novelStore.currentNovel)
 const localDescription = ref('')
 const localOutline = ref('')
 const localCharacters = ref<Character[]>([])
+const localRelationships = ref<NovelRelationship[]>([])
 const localEvents = ref<Event[]>([])
 
 // ------ 自动保存（防抖） ------
@@ -42,6 +43,7 @@ async function doAutoSave() {
     description: localDescription.value.trim() || undefined,
     outline: localOutline.value.trim() || undefined,
     characters: localCharacters.value,
+    relationships: localRelationships.value,
     events: localEvents.value,
   })
   saving.value = false
@@ -61,6 +63,7 @@ function initLocalState() {
   localDescription.value = n.description || ''
   localOutline.value = n.outline || ''
   localCharacters.value = JSON.parse(JSON.stringify(n.characters || []))
+  localRelationships.value = JSON.parse(JSON.stringify(n.relationships || []))
   localEvents.value = JSON.parse(JSON.stringify(n.events || []))
   initialized = true
 }
@@ -138,6 +141,7 @@ const totalWords = computed(() =>
         <n-tab-pane name="characters" tab="人物关系图">
           <CharacterGraph
             v-model:characters="localCharacters"
+            v-model:relationships="localRelationships"
             :novel-id="novel?.id"
             class="tab-fill"
           />

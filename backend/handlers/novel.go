@@ -61,7 +61,7 @@ func (h *NovelHandler) HandleGet(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, novel)
 }
 
-// HandleUpdate 更新小说元数据（大纲、角色、事件、简介等）
+// HandleUpdate 更新小说元数据（大纲、角色、关系、事件、简介等）
 // PUT /api/novels/{id}
 func (h *NovelHandler) HandleUpdate(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
@@ -72,24 +72,36 @@ func (h *NovelHandler) HandleUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Title       string             `json:"title,omitempty"`
-		Outline     string             `json:"outline,omitempty"`
-		Description string             `json:"description,omitempty"`
-		Characters  []models.Character `json:"characters,omitempty"`
-		Events      []models.Event     `json:"events,omitempty"`
+		Title         *string                    `json:"title,omitempty"`
+		Outline       *string                    `json:"outline,omitempty"`
+		Description   *string                    `json:"description,omitempty"`
+		Characters    []models.Character         `json:"characters,omitempty"`
+		Relationships []models.NovelRelationship `json:"relationships,omitempty"`
+		Events        []models.Event             `json:"events,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "请求格式错误")
 		return
 	}
 
-	if req.Title != "" {
-		novel.Title = req.Title
+	if req.Title != nil {
+		novel.Title = *req.Title
 	}
-	novel.Outline = req.Outline
-	novel.Description = req.Description
-	novel.Characters = req.Characters
-	novel.Events = req.Events
+	if req.Outline != nil {
+		novel.Outline = *req.Outline
+	}
+	if req.Description != nil {
+		novel.Description = *req.Description
+	}
+	if req.Characters != nil {
+		novel.Characters = req.Characters
+	}
+	if req.Relationships != nil {
+		novel.Relationships = req.Relationships
+	}
+	if req.Events != nil {
+		novel.Events = req.Events
+	}
 
 	if err := h.novelStore.UpdateNovel(novel); err != nil {
 		writeError(w, http.StatusInternalServerError, "更新失败: "+err.Error())

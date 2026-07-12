@@ -1,4 +1,4 @@
-import type {Chapter, Character, Event, Novel} from '../types'
+import type {Chapter, Character, Event, Novel, NovelRelationship} from '../types'
 
 const BASE = '/api/novels'
 
@@ -33,6 +33,7 @@ export async function updateNovel(id: string, data: {
   description?: string
   outline?: string
   characters?: Character[]
+  relationships?: NovelRelationship[]
   events?: Event[]
 }): Promise<Novel> {
   const res = await fetch(`${BASE}/${id}`, {

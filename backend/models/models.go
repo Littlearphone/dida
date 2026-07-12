@@ -4,35 +4,37 @@ import (
 	"time"
 )
 
-// Novel 小说模型，包含元数据、角色和事件信息
+// Novel 小说模型，包含元数据、角色、关系和事件信息
 type Novel struct {
-	ID          string      `json:"id"`
-	Title       string      `json:"title"`
-	Author      string      `json:"author"`
-	CoverPath   string      `json:"coverPath,omitempty"`   // 封面图片路径
-	Description string      `json:"description,omitempty"` // AI识别或用户填写的小说简介
-	ChapterIDs  []string    `json:"chapterIds"`            // 章节ID有序列表
-	Outline     string      `json:"outline,omitempty"`     // 大纲内容
-	Characters  []Character `json:"characters,omitempty"`
-	Events      []Event     `json:"events,omitempty"`
-	CreatedAt   time.Time   `json:"createdAt"`
-	UpdatedAt   time.Time   `json:"updatedAt"`
-	WordCount   int64       `json:"wordCount"`
+	ID            string              `json:"id"`
+	Title         string              `json:"title"`
+	Author        string              `json:"author"`
+	CoverPath     string              `json:"coverPath,omitempty"`   // 封面图片路径
+	Description   string              `json:"description,omitempty"` // AI识别或用户填写的小说简介
+	ChapterIDs    []string            `json:"chapterIds"`            // 章节ID有序列表
+	Outline       string              `json:"outline,omitempty"`     // 大纲内容
+	Characters    []Character         `json:"characters,omitempty"`
+	Relationships []NovelRelationship `json:"relationships,omitempty"` // 平铺的角色关系
+	Events        []Event             `json:"events,omitempty"`
+	CreatedAt     time.Time           `json:"createdAt"`
+	UpdatedAt     time.Time           `json:"updatedAt"`
+	WordCount     int64               `json:"wordCount"`
 }
 
 // Character 角色信息
 type Character struct {
-	Name          string         `json:"name"`
-	Description   string         `json:"description,omitempty"`
-	Alias         string         `json:"alias,omitempty"`         // 别名
-	Traits        string         `json:"traits,omitempty"`        // 性格特征
-	Relationships []Relationship `json:"relationships,omitempty"` // 与其他角色的关系
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Alias       string `json:"alias,omitempty"`  // 别名
+	Traits      string `json:"traits,omitempty"` // 性格特征
+	// 注意：角色关系已迁移至 Novel.Relationships 平铺存储
 }
 
-// Relationship 角色关系
-type Relationship struct {
-	TargetName   string `json:"targetName"`   // 关系目标角色名
-	RelationType string `json:"relationType"` // 关系类型（朋友/敌人/恋人等）
+// NovelRelationship 小说级角色关系（平铺，不挂在单个角色下）
+type NovelRelationship struct {
+	Source       string `json:"source"`
+	Target       string `json:"target"`
+	RelationType string `json:"relationType"`
 	Description  string `json:"description,omitempty"`
 }
 
@@ -113,13 +115,14 @@ type Usage struct {
 
 // SplitResult AI拆分章节的结果
 type SplitResult struct {
-	Title       string         `json:"title,omitempty"`       // AI识别的小说标题
-	Author      string         `json:"author,omitempty"`      // AI识别的作者
-	Description string         `json:"description,omitempty"` // AI识别的小说简介
-	Chapters    []SplitChapter `json:"chapters"`
-	Characters  []Character    `json:"characters"`
-	Events      []Event        `json:"events"`
-	Outline     string         `json:"outline"`
+	Title         string              `json:"title,omitempty"`       // AI识别的小说标题
+	Author        string              `json:"author,omitempty"`      // AI识别的作者
+	Description   string              `json:"description,omitempty"` // AI识别的小说简介
+	Chapters      []SplitChapter      `json:"chapters"`
+	Characters    []Character         `json:"characters"`
+	Relationships []NovelRelationship `json:"relationships,omitempty"` // AI识别的角色关系
+	Events        []Event             `json:"events"`
+	Outline       string              `json:"outline"`
 }
 
 // SplitChapter AI拆分出的章节
@@ -132,16 +135,8 @@ type SplitChapter struct {
 type ExtractionResult struct {
 	Outline       string              `json:"outline"`
 	Characters    []Character         `json:"characters"`
-	Relationships []RelationshipEntry `json:"relationships"`
+	Relationships []NovelRelationship `json:"relationships"`
 	Events        []ExtractedEvent    `json:"events"`
-}
-
-// RelationshipEntry 关系条目（平铺便于序列化）
-type RelationshipEntry struct {
-	Source      string `json:"source"`
-	Target      string `json:"target"`
-	Relation    string `json:"relation"`
-	Description string `json:"description,omitempty"`
 }
 
 // ExtractedEvent 提取的事件

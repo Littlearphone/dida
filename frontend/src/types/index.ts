@@ -8,6 +8,7 @@ export interface Novel {
   chapterIds: string[]
   outline?: string
   characters?: Character[]
+  relationships?: NovelRelationship[]  // 平铺的角色关系
   events?: Event[]
   createdAt: string
   updatedAt: string
@@ -20,12 +21,12 @@ export interface Character {
   description?: string
   alias?: string
   traits?: string
-  relationships?: Relationship[]
 }
 
-// 角色关系
-export interface Relationship {
-  targetName: string
+// 小说级角色关系（平铺，不挂在单个角色下）
+export interface NovelRelationship {
+  source: string
+  target: string
   relationType: string
   description?: string
 }
@@ -82,6 +83,7 @@ export interface SplitResult {
   description?: string     // AI识别的小说简介
   chapters: SplitChapter[]
   characters: Character[]
+  relationships?: NovelRelationship[]  // AI识别的角色关系
   events: Event[]
   outline: string
 }
@@ -95,15 +97,8 @@ export interface SplitChapter {
 export interface ExtractionResult {
   outline: string
   characters: Character[]
-  relationships: RelationshipEntry[]
+  relationships: NovelRelationship[]
   events: ExtractedEvent[]
-}
-
-export interface RelationshipEntry {
-  source: string
-  target: string
-  relation: string
-  description?: string
 }
 
 export interface ExtractedEvent {

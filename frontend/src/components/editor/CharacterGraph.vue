@@ -9,8 +9,8 @@ import {
 } from '@vicons/ionicons5'
 import { Network } from 'vis-network'
 import { DataSet } from 'vis-data'
-import type { Character, Relationship } from '../../types'
-import { useNovelStore } from '../../stores/novel'
+import type { Character, NovelRelationship } from '@/types'
+import { useNovelStore } from '@/stores/novel.ts'
 
 
 /** vis-network 节点数据结构 */
@@ -37,17 +37,17 @@ interface VisEdgeItem {
   smooth: { type: string; roundness: number }
   color: { color: string; highlight: string }
   width: number
-  arrows?: string
-  arrowStrikethrough?: boolean
 }
 
 const props = defineProps<{
   characters: Character[]
+  relationships?: NovelRelationship[]
   /** 提供 novelId 时，角色变更（新增/编辑/删除）会自动持久化到后端 */
   novelId?: string
 }>()
 const emit = defineEmits<{
   'update:characters': [chars: Character[]]
+  'update:relationships': [rels: NovelRelationship[]]
 }>()
 
 const message = useMessage()
@@ -57,7 +57,7 @@ let network: Network | null = null
 
 /** 是否有已定义的关系 */
 const hasRelationships = computed(() =>
-  props.characters.some(c => c.relationships && c.relationships.length > 0),
+  props.relationships !== undefined && props.relationships.length > 0,
 )
 
 // ------ 角色编辑弹框 ------
@@ -67,7 +67,9 @@ const editName = ref('')
 const editAlias = ref('')
 const editTraits = ref('')
 const editDesc = ref('')
-const editRelationships = ref<Relationship[]>([])
+/** 编辑弹框中当前角色的关系列表（含方向：isIncoming=true 表示其他角色→当前角色） */
+interface EditRel { targetName: string; relationType: string; description?: string; isIncoming?: boolean }
+const editRelationships = ref<EditRel[]>([])
 
 // ------ 连线模式（直接在图上点节点建关系）------
 const connectMode = ref(false)
@@ -77,21 +79,145 @@ const showConnectDialog = ref(false)
 const connectType = ref('')
 const connectDesc = ref('')
 
+/** 拖拽绘制连线状态 */
+const dragActive = ref(false)
+const dragSourceIdx = ref(-1)
+const dragLine = ref({ x1: 0, y1: 0, x2: 0, y2: 0 })
+/** SVG viewBox，同步到容器实际尺寸，让坐标系 = 像素坐标 */
+const svgViewBox = ref('0 0 100 100')
+
+function updateSvgViewBox() {
+  if (!containerRef.value) return
+  const rect = containerRef.value.getBoundingClientRect()
+  svgViewBox.value = `0 0 ${Math.max(1, Math.round(rect.width))} ${Math.max(1, Math.round(rect.height))}`
+}
+
 function toggleConnectMode() {
-  connectMode.value = !connectMode.value
   if (connectMode.value) {
-    connectSrcIdx.value = -1
-    message.info('连线模式：点击一个角色作为关系起点')
+    network?.setOptions({ interaction: { dragNodes: true } })
+    cancelConnect()
+  } else {
+    enterConnectMode()
   }
 }
 
-function cancelConnect() {
+/** 进入连线模式 */
+function enterConnectMode() {
+  connectMode.value = true
+  resetConnectState()
+  network?.setOptions({ interaction: { dragNodes: false } })
+  setCanvasPointerEvents('none')
+  const el = containerRef.value
+  if (el) el.addEventListener('mousedown', onDragMouseDown)
+  message.info('连线模式：从节点拖拽连线到目标节点')
+}
+
+/** 退出连线模式 */
+function exitConnectMode() {
   connectMode.value = false
+  resetConnectState()
+  removeDragListeners()
+  network?.setOptions({ interaction: { dragNodes: true } })
+}
+
+/** 重置连线状态但不退出连线模式（便于连续建关系） */
+function resetConnectState() {
   showConnectDialog.value = false
   connectSrcIdx.value = -1
   connectTgtIdx.value = -1
   connectType.value = ''
   connectDesc.value = ''
+  dragActive.value = false
+  dragSourceIdx.value = -1
+}
+
+/** 启用/禁用 vis-network canvas 的指针事件 */
+function setCanvasPointerEvents(val: 'auto' | 'none') {
+  if (!containerRef.value) return
+  const canvases = containerRef.value.querySelectorAll('canvas')
+  canvases.forEach(c => c.style.pointerEvents = val)
+}
+
+/** 清理拖拽相关的事件监听 */
+function removeDragListeners() {
+  setCanvasPointerEvents('auto')
+  const el = containerRef.value
+  if (el) el.removeEventListener('mousedown', onDragMouseDown)
+  document.removeEventListener('mousemove', onDragMouseMove)
+  document.removeEventListener('mouseup', onDragMouseUp)
+}
+
+function cancelConnect() {
+  exitConnectMode()
+}
+
+/** 点击连线按钮：若网络未就绪则强制构建后再进入连线模式 */
+function handleConnectClick() {
+  if (!network) {
+    ensureGraphBuilt()
+    return
+  }
+  toggleConnectMode()
+}
+
+/** mousedown：检测节点并启动拖拽 */
+function onDragMouseDown(e: MouseEvent) {
+  if (!network) return
+  const el = containerRef.value
+  if (!el) return
+  const rect = el.getBoundingClientRect()
+  const x = e.clientX - rect.left
+  const y = e.clientY - rect.top
+  const idx = network.getNodeAt({ x, y }) as number | undefined
+  if (idx === undefined) return
+
+  e.preventDefault()
+  dragSourceIdx.value = idx
+  dragActive.value = true
+
+  // 获取源节点中心在 DOM 中的坐标作为线起点
+  const canvasPos = network.getPosition(idx)
+  const domPos = network.canvasToDOM(canvasPos)
+  dragLine.value = { x1: domPos.x, y1: domPos.y, x2: x, y2: y }
+
+  // 在 document 上监听 move/up，防止鼠标移出画布后丢失事件
+  document.addEventListener('mousemove', onDragMouseMove)
+  document.addEventListener('mouseup', onDragMouseUp)
+}
+
+/** 拖拽中：更新 SVG 线的终点 */
+function onDragMouseMove(e: MouseEvent) {
+  if (!dragActive.value) return
+  e.preventDefault()
+  const el = containerRef.value
+  if (el) {
+    const rect = el.getBoundingClientRect()
+    dragLine.value.x2 = e.clientX - rect.left
+    dragLine.value.y2 = e.clientY - rect.top
+  }
+}
+
+/** 拖拽结束：检测目标节点 */
+function onDragMouseUp(e: MouseEvent) {
+  document.removeEventListener('mousemove', onDragMouseMove)
+  document.removeEventListener('mouseup', onDragMouseUp)
+
+  if (!dragActive.value) return
+  dragActive.value = false
+
+  const el = containerRef.value
+  if (el) {
+    const rect = el.getBoundingClientRect()
+    const x = e.clientX - rect.left
+    const y = e.clientY - rect.top
+    const targetIdx = network?.getNodeAt({ x, y }) as number | undefined
+    if (targetIdx !== undefined && targetIdx !== dragSourceIdx.value) {
+      connectSrcIdx.value = dragSourceIdx.value
+      connectTgtIdx.value = targetIdx
+      showConnectDialog.value = true
+    }
+  }
+  dragSourceIdx.value = -1
 }
 
 function confirmConnect() {
@@ -99,19 +225,20 @@ function confirmConnect() {
     message.warning('请输入关系类型')
     return
   }
-  const src = connectSrcIdx.value
-  const tgt = connectTgtIdx.value
-  const list = [...props.characters]
-  if (!list[src].relationships) list[src].relationships = []
-  list[src].relationships.push({
-    targetName: props.characters[tgt].name,
+  const srcName = props.characters[connectSrcIdx.value].name
+  const tgtName = props.characters[connectTgtIdx.value].name
+  // 添加到平铺关系列表
+  const newRel: NovelRelationship = {
+    source: srcName,
+    target: tgtName,
     relationType: connectType.value.trim(),
     description: connectDesc.value.trim() || undefined,
-  })
-  emit('update:characters', list)
-  autoSave(list)
-  message.success(`已添加「${props.characters[src].name}」→「${props.characters[tgt].name}」`)
-  cancelConnect()
+  }
+  const newRels = [...(props.relationships || []), newRel]
+  emit('update:relationships', newRels)
+  autoSave(props.characters, newRels)
+  message.success(`已添加「${srcName}」→「${tgtName}」`)
+  resetConnectState()
 }
 
 /** 其他角色名列表（用于关系下拉选择） */
@@ -135,7 +262,10 @@ function openEdit(index: number) {
   editAlias.value = ch.alias || ''
   editTraits.value = ch.traits || ''
   editDesc.value = ch.description || ''
-  editRelationships.value = JSON.parse(JSON.stringify(ch.relationships || []))
+  // 显示所有涉及该角色的关系（出向 + 入向），isIncoming 标记方向
+  editRelationships.value = (props.relationships || [])
+    .filter(r => r.source === ch.name || r.target === ch.name)
+    .map(r => ({ targetName: r.source === ch.name ? r.target : r.source, relationType: r.relationType, description: r.description, isIncoming: r.target === ch.name }))
   // 排除自身
   otherCharNames.value = props.characters
     .filter((_, i) => i !== index)
@@ -164,61 +294,66 @@ function saveCharacter() {
     message.warning('角色名称已存在')
     return
   }
+  const charName = editName.value.trim()
   const list = [...props.characters]
   const ch: Character = {
-    name: editName.value.trim(),
+    name: charName,
     alias: editAlias.value.trim() || undefined,
     traits: editTraits.value.trim() || undefined,
     description: editDesc.value.trim() || undefined,
-    relationships: editRelationships.value.filter(r => r.targetName.trim()) || undefined,
   }
   if (editingIndex.value >= 0) {
     list[editingIndex.value] = ch
   } else {
     list.push(ch)
   }
+
+  // 移除此角色相关的所有旧关系（含作为 source 和 target），再按编辑后的方向写回
+  const oldName = editingIndex.value >= 0 ? props.characters[editingIndex.value].name : ''
+  let newRels = (props.relationships || []).filter(r => r.source !== oldName && r.target !== oldName)
+  const validRels = editRelationships.value.filter(r => r.targetName.trim())
+  for (const r of validRels) {
+    if (r.isIncoming) {
+      // 其他角色 → 当前角色
+      newRels.push({ source: r.targetName.trim(), target: charName, relationType: r.relationType.trim(), description: r.description?.trim() || undefined })
+    } else {
+      // 当前角色 → 其他角色
+      newRels.push({ source: charName, target: r.targetName.trim(), relationType: r.relationType.trim(), description: r.description?.trim() || undefined })
+    }
+  }
+
   emit('update:characters', list)
+  emit('update:relationships', newRels)
   showEdit.value = false
-  // 自动保存到后端（提供 novelId 时）
-  autoSave(list)
+  autoSave(list, newRels)
 }
 
 function removeCharacter(index: number) {
   const ch = props.characters[index]
-  // 检查是否有其他角色的关系引用该角色
-  const refs = props.characters
-    .map((c, i) => ({ name: c.name, i }))
-    .filter(({ name }) =>
-      name !== ch.name && props.characters.some(
-        c2 => c2.relationships?.some(r => r.targetName === ch.name),
-      ),
-    )
-  if (refs.length > 0) {
-    const names = refs.map(r => r.name).join('、')
-    if (!window.confirm(`角色「${ch.name}」被其他角色（${names}）的关系引用。删除后将自动清理这些引用，是否继续？`)) {
+  // 检查是否有涉及该角色的关系
+  const involvedRels = (props.relationships || []).filter(r => r.source === ch.name || r.target === ch.name)
+  if (involvedRels.length > 0) {
+    if (!window.confirm(`角色「${ch.name}」存在 ${involvedRels.length} 条关系记录。删除后这些关系将被清理，是否继续？`)) {
       return
     }
   }
   const list = [...props.characters]
   list.splice(index, 1)
-  // 清理其他角色中对该角色的关系引用
-  const targetName = ch.name
-  for (const c of list) {
-    if (c.relationships) {
-      c.relationships = c.relationships.filter(r => r.targetName !== targetName)
-      if (c.relationships.length === 0) c.relationships = undefined
-    }
-  }
+  // 清理涉及该角色的所有关系
+  const newRels = (props.relationships || []).filter(r => r.source !== ch.name && r.target !== ch.name)
+
   emit('update:characters', list)
-  // 自动保存到后端（提供 novelId 时）
-  autoSave(list)
+  emit('update:relationships', newRels)
+  autoSave(list, newRels)
 }
 
-/** 有 novelId 时自动将角色数据持久化到后端 */
-async function autoSave(chars: Character[]) {
+/** 有 novelId 时自动将角色和关系数据持久化到后端 */
+async function autoSave(chars: Character[], rels?: NovelRelationship[]) {
   if (!props.novelId) return
-  const ok = await novelStore.updateNovelMeta(props.novelId, { characters: chars })
-  if (!ok) message.error('角色数据保存失败')
+  const data: Parameters<typeof novelStore.updateNovelMeta>[1] = { characters: chars }
+  if (rels !== undefined) data.relationships = rels
+  const ok = await novelStore.updateNovelMeta(props.novelId, data)
+  if (!ok) message.error('数据保存失败')
 }
 
 // ------ vis-network ------
@@ -242,6 +377,7 @@ function scheduleResizeFit() {
   if (resizeFitTimer) clearTimeout(resizeFitTimer)
   resizeFitTimer = setTimeout(() => {
     network?.fit({ animation: false })
+    updateSvgViewBox()
   }, 150)
 }
 
@@ -263,6 +399,9 @@ function nodeColor(name: string) {
 
 function buildGraph() {
   if (!containerRef.value) return
+
+  // 记住重建前是否处于连线模式（以便重建后恢复，实现连续建关系）
+  const wasConnect = connectMode.value
 
   // 重建时退出连线模式
   cancelConnect()
@@ -294,26 +433,24 @@ function buildGraph() {
   })
 
   const edgeItems: VisEdgeItem[] = []
-  chars.forEach((ch, i) => {
-    if (!ch.relationships) return
-    ch.relationships.forEach(rel => {
-      const targetIdx = chars.findIndex(c => c.name === rel.targetName)
-      if (targetIdx >= 0) {
-        edgeItems.push({
-          from: i,
-          to: targetIdx,
-          label: rel.relationType,
-          title: rel.description || undefined,
-          font: { size: 12, align: 'middle', color: '#666' },
-          smooth: { type: 'curvedCW', roundness: 0.12 },
-          color: { color: '#888', highlight: '#2080f0' },
-          width: 2,
-          arrows: 'to',
-          arrowStrikethrough: false,
-        })
-      }
-    })
-  })
+  // 从小说级平铺关系列表构建边（直接迭代，无重复）
+  if (props.relationships) {
+    for (const rel of props.relationships) {
+      const sourceIdx = chars.findIndex(c => c.name === rel.source)
+      const targetIdx = chars.findIndex(c => c.name === rel.target)
+      if (sourceIdx < 0 || targetIdx < 0) continue
+      edgeItems.push({
+        from: sourceIdx,
+        to: targetIdx,
+        label: rel.relationType,
+        title: rel.description || undefined,
+        font: { size: 12, align: 'middle', color: '#666' },
+        smooth: { type: 'curvedCW', roundness: 0.12 },
+        color: { color: '#888', highlight: '#2080f0' },
+        width: 2,
+      })
+    }
+  }
 
   // 用 as any 绕过 vis-data 严格类型（边没有 id 字段，仅有 from/to）
   const nodes = new DataSet(nodeItems as any)
@@ -341,33 +478,11 @@ function buildGraph() {
     },
   )
 
-  // 点击事件：普通模式编辑角色，连线模式建关系
+  // 点击事件：编辑角色（连线模式下 canvas 已禁用指针事件，不会触发此处）
   network.on('click', (params) => {
-    if (params.nodes.length === 0) {
-      // 点击空白 — 如果处于连线模式则退出
-      if (connectMode.value) cancelConnect()
-      return
-    }
+    if (connectMode.value) return // 安全兜底，连线模式不处理
+    if (params.nodes.length === 0) return
     const nodeIdx = params.nodes[0] as number
-
-    if (connectMode.value) {
-      // 连线模式
-      if (connectSrcIdx.value === -1) {
-        // 第一步：选择起点
-        connectSrcIdx.value = nodeIdx
-        message.info(`已选择「${props.characters[nodeIdx].name}」，请点击关系目标`)
-      } else if (connectSrcIdx.value === nodeIdx) {
-        // 点了同一个节点 → 取消选择
-        connectSrcIdx.value = -1
-        message.info('已取消选择，重新点击起点')
-      } else {
-        // 第二步：选择终点 → 弹出关系类型输入
-        connectTgtIdx.value = nodeIdx
-        showConnectDialog.value = true
-      }
-      return
-    }
-
     // 普通模式：编辑角色
     openEdit(nodeIdx)
   })
@@ -381,7 +496,12 @@ function buildGraph() {
   network.once('stabilizationIterationsDone', () => {
     network?.fit({ animation: true })
     network?.setOptions({ physics: { enabled: false } })
+    // 如果重建前处于连线模式，重建后自动恢复（实现连续建关系）
+    if (wasConnect) nextTick(enterConnectMode)
   })
+
+  // 同步 SVG viewBox 到容器尺寸，确保坐标系与像素匹配
+  nextTick(updateSvgViewBox)
 }
 
 // 重建网络（加防抖避免频繁重建）
@@ -398,9 +518,20 @@ watch(() => props.characters, () => {
   nextTick(scheduleRebuild)
 }, { deep: true })
 
+// 关系变化时重建图谱，确保添加连线后立即显示
+watch(() => props.relationships, () => {
+  nextTick(scheduleRebuild)
+}, { deep: true })
+
 onMounted(() => {
-  // 用 ResizeObserver 等容器有真实尺寸后再构建；构建后继续监听容器高度变化重新居中
   if (!containerRef.value) return
+  // 容器在挂载时可能已有尺寸，立即尝试构建（比等 ResizeObserver 回调更快）
+  if (!graphBuilt) {
+    const rect = containerRef.value.getBoundingClientRect()
+    if (rect.width > 0 && rect.height > 0) ensureGraphBuilt()
+  }
+  // 同时用 ResizeObserver 兜底：容器还未渲染完毕就等它出现尺寸后再构建
+  // 构建后继续监听容器高度变化重新居中
   resizeObserver = new ResizeObserver((entries) => {
     for (const entry of entries) {
       if (entry.contentRect.width > 0 && entry.contentRect.height > 0) {
@@ -420,6 +551,7 @@ onUnmounted(() => {
   if (resizeObserver) resizeObserver.disconnect()
   if (rebuildTimer) clearTimeout(rebuildTimer)
   if (resizeFitTimer) clearTimeout(resizeFitTimer)
+  removeDragListeners()
 })
 
 /** 重新布局（用户手动触发） */
@@ -429,6 +561,7 @@ function reLayout() {
     network.once('stabilizationIterationsDone', () => {
       network?.fit({ animation: true })
       network?.setOptions({ physics: { enabled: false } })
+      updateSvgViewBox()
     })
   }
 }
@@ -444,23 +577,37 @@ function reLayout() {
       <n-button size="small" secondary @click="reLayout" :disabled="!network">
         重新布局
       </n-button>
-      <n-button size="small" :type="connectMode ? 'warning' : 'secondary'" @click="toggleConnectMode" :disabled="!network">
+      <n-button size="small" :type="connectMode ? 'warning' : 'secondary'" @click="handleConnectClick" :disabled="characters.length === 0">
         连线
       </n-button>
       <n-text v-if="characters.length > 0" depth="3" style="font-size: 13px;">
-        {{ characters.length }} 个角色 · 点击节点编辑 · 连线模式建关系
+        {{ characters.length }} 个角色 · 点击节点编辑 · 拖拽连线建关系
       </n-text>
     </div>
 
-    <!-- vis-network 画布 -->
+    <!-- vis-network 画布 + SVG 拖拽叠加层（SVG 在外层避免 vis-network DOM 干扰） -->
     <div v-if="characters.length > 0" class="graph-area">
       <div ref="containerRef" class="graph-container" :class="{ 'connect-mode': connectMode }" />
+      <svg class="graph-svg-overlay" :viewBox="svgViewBox">
+        <defs>
+          <marker id="drag-arrow" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#2080f0" />
+          </marker>
+        </defs>
+        <!-- 拖拽预览线：内联属性避免 scoped CSS 不作用到 SVG 元素 -->
+        <line v-if="dragActive"
+          :x1="dragLine.x1" :y1="dragLine.y1"
+          :x2="dragLine.x2" :y2="dragLine.y2"
+          stroke="#2080f0" stroke-width="2.5"
+          stroke-dasharray="6, 4" stroke-linecap="round"
+          marker-end="url(#drag-arrow)" />
+      </svg>
     </div>
     <!-- 有角色但无关系时显示提示（置于图下方，不遮挡） -->
     <div v-if="characters.length > 0 && !hasRelationships" class="graph-hint">
-      角色已就绪，点击「连线」按钮在图上直接建立关系
+      角色已就绪，点击「连线」按钮拖拽建立关系
     </div>
-    <n-empty v-else description="还没有角色" class="graph-empty">
+    <n-empty v-if="characters.length === 0" description="还没有角色" class="graph-empty">
       <template #extra>
         <n-button size="small" @click="openAdd">添加第一个角色</n-button>
       </template>
@@ -500,6 +647,9 @@ function reLayout() {
                 style="width: 130px;"
                 size="small"
               />
+              <n-button text size="small" style="width: 28px; font-size: 16px; flex-shrink: 0;" @click="rel.isIncoming = !rel.isIncoming" :title="rel.isIncoming ? '入向（←）' : '出向（→）'">
+                {{ rel.isIncoming ? '←' : '→' }}
+              </n-button>
               <n-input
                 v-model:value="rel.relationType"
                 placeholder="关系类型"
@@ -579,6 +729,7 @@ function reLayout() {
 .graph-container {
   flex: 1;
   min-height: 0;
+  position: relative;
   border: 1px solid #eee;
   border-radius: 6px;
   background: #fafafa;
@@ -588,6 +739,15 @@ function reLayout() {
   cursor: crosshair;
 }
 
+/* SVG 拖拽线叠加层：仅用于视觉绘制，不拦截鼠标事件 */
+.graph-svg-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 10;
+}
 /* 无关系提示 — 置于图容器下方，不遮挡画布 */
 .graph-hint {
   flex-shrink: 0;

@@ -245,7 +245,8 @@ func (c *DeepSeekClient) SplitChapters(content string) (*models.SplitResult, err
 2. 用行号标注每章的起止行（startPara/endPara），后端据此切分正文
 3. 为每章取精炼且有吸引力的标题
 4. 提取主要角色（角色名、性格特征、描述）
-5. 生成故事大纲
+5. 提取角色之间的关系（谁和谁是什么关系）
+	6. 生成故事大纲
 
 JSON格式（不要包含原文正文）：
 {
@@ -254,6 +255,7 @@ JSON格式（不要包含原文正文）：
   "description": "小说简介",
   "chapters": [{"title": "精炼标题", "startPara": 1, "endPara": 20}],
   "characters": [{"name": "角色名", "description": "描述", "alias": "别名", "traits": "性格特征"}],
+	  "relationships": [{"source": "角色A", "target": "角色B", "relationType": "关系类型", "description": "关系描述"}],
   "events": [{"name": "事件名", "description": "描述", "timeOrder": "时间顺序"}],
   "outline": "大纲内容"
 }
@@ -297,9 +299,10 @@ JSON格式（不要包含原文正文）：
 			StartPara int    `json:"startPara"`
 			EndPara   int    `json:"endPara"`
 		} `json:"chapters"`
-		Characters []models.Character `json:"characters"`
-		Events     []models.Event     `json:"events"`
-		Outline    string             `json:"outline"`
+		Characters    []models.Character         `json:"characters"`
+		Relationships []models.NovelRelationship `json:"relationships"`
+		Events        []models.Event             `json:"events"`
+		Outline       string                     `json:"outline"`
 	}
 	if err := json.Unmarshal(jsonBytes, &aiResp); err != nil {
 		preview := []rune(string(jsonBytes))
@@ -312,12 +315,13 @@ JSON格式（不要包含原文正文）：
 
 	// 根据行号从原文提取正文
 	splitResult := &models.SplitResult{
-		Title:       aiResp.Title,
-		Author:      aiResp.Author,
-		Description: aiResp.Description,
-		Characters:  aiResp.Characters,
-		Events:      aiResp.Events,
-		Outline:     aiResp.Outline,
+		Title:         aiResp.Title,
+		Author:        aiResp.Author,
+		Description:   aiResp.Description,
+		Characters:    aiResp.Characters,
+		Events:        aiResp.Events,
+		Relationships: aiResp.Relationships,
+		Outline:       aiResp.Outline,
 	}
 	for _, ch := range aiResp.Chapters {
 		start := ch.StartPara
@@ -362,7 +366,7 @@ func (c *DeepSeekClient) ExtractNovelInfo(chapters []models.Chapter, fullContent
 {
   "outline": "完整的故事大纲，包括起承转合、主要情节线",
   "characters": [{"name": "角色名", "description": "角色详细描述", "alias": "别名", "traits": "性格特征"}],
-  "relationships": [{"source": "角色A", "target": "角色B", "relation": "关系类型（如：朋友/敌人/恋人/师徒等）", "description": "关系描述"}],
+  "relationships": [{"source": "角色A", "target": "角色B", "relationType": "关系类型（如：朋友/敌人/恋人/师徒等）", "description": "关系描述"}],
   "events": [{"name": "事件名称", "description": "事件详细描述", "timeOrder": "时间顺序（如：序章/第一章/事件一/时间点等）", "relatedChars": ["关联角色1", "关联角色2"]}]
 }
 

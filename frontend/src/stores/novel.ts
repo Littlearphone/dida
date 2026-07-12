@@ -1,6 +1,6 @@
 import {defineStore} from 'pinia'
 import {ref} from 'vue'
-import type {Chapter, Character, Event, Novel} from '../types'
+import type {Chapter, Character, Event, Novel, NovelRelationship} from '../types'
 import * as novelApi from '../api/novel'
 import * as chapterApi from '../api/chapter'
 
@@ -173,6 +173,7 @@ export const useNovelStore = defineStore('novel', () => {
     description?: string
     outline?: string
     characters?: Character[]
+    relationships?: NovelRelationship[]
     events?: Event[]
   }): Promise<boolean> {
     try {

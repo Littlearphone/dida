@@ -102,6 +102,7 @@ async function saveExtractedInfo(novel: Novel, split: SplitResult) {
   novel.outline = split.outline
   novel.description = split.description
   novel.characters = split.characters
+  novel.relationships = split.relationships
   novel.events = split.events
   try {
     const response = await fetch(`/api/novels/${novel.id}`, {
@@ -111,6 +112,7 @@ async function saveExtractedInfo(novel: Novel, split: SplitResult) {
         outline: split.outline,
         description: split.description,
         characters: split.characters,
+        relationships: split.relationships,
         events: split.events,
       }),
     })
