@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, inject, watch, onUnmounted } from 'vue'
+import { ref, inject, watch } from 'vue'
 import { NModal, NAlert, NForm, NFormItem, NInput, NButton, NSpace, NIcon, NProgress, useMessage } from 'naive-ui'
 import {
   CopyOutline as CopyIcon, ArrowDownOutline as InsertIcon,
@@ -8,12 +8,13 @@ import {
   RefreshOutline as RefreshIcon,
 } from '@vicons/ionicons5'
 import { useNovelStore } from '../../stores/novel'
+import { useAIStream } from '../../composables/useAIStream'
+import { htmlToPlainText, normalizeParagraphs } from '../../utils/editor'
 import * as aiApi from '../../api/ai'
 import { EDITOR_ACTIONS_KEY } from '../../types/editor'
 
 const props = defineProps<{
   show: boolean
-  /** 从 AIEditDialog 返回的精炼结果（润色/扩写后），替换当前续写内容 */
   refinedContent?: string
 }>()
 const emit = defineEmits<{
@@ -28,100 +29,40 @@ const message = useMessage()
 const editorActions = inject(EDITOR_ACTIONS_KEY)!
 
 const continueRequirement = ref('')
-const continueLoading = ref(false)
 const continueResult = ref('')
 const showContinueResult = ref(false)
-const generateProgress = ref(0) // 模拟进度 0-100
-const generateStatus = ref('') // 当前状态文字
-// 用于取消流式请求的 AbortController
-let abortController: AbortController | null = null
-/** 自动重试：AI 返回空内容时自动重试 */
-const MAX_RETRIES = 2
-let retries = 0
-let cancelRequested = false
 
-/** 将 HTML 转为纯文本并保留段落结构（双换行分隔） */
-function htmlToPlainText(html: string): string {
-  if (!/<\/?[a-z][\s\S]*?>/i.test(html)) return html
-  const div = document.createElement('div')
-  div.innerHTML = html
-  div.querySelectorAll('p, div, h1, h2, h3, h4, h5, h6, li, blockquote').forEach(el => el.after('\n\n'))
-  div.querySelectorAll('br').forEach(el => el.replaceWith('\n'))
-  return (div.textContent || '').replace(/\n{3,}/g, '\n\n').trim()
-}
+const {
+  loading: continueLoading, progress: generateProgress, progressText: generateStatus,
+  MAX_RETRIES,
+  getAbortSignal: getSignal, cleanupRequest, resetRetry,
+  shouldRetry, isCanceled, incrementRetry,
+  startProgressSimulation: startProgress, stopProgressSimulation: stopProgress,
+  completeProgress, errorProgress,
+} = useAIStream()
 
 /** 归一化段落换行：当 AI 返回的内容没有双换行但存在单换行时，将单换行视为段落分隔 */
-function normalizeParagraphs(text: string): string {
-  if (!text) return text
-  if (!/\n\n/.test(text) && /\n/.test(text)) {
-    return text.split(/\n+/).map(s => s.trim()).filter(Boolean).join('\n\n')
-  }
-  return text
-}
-
-/** 模拟进度的定时器，让进度条平滑递增到 90% */
-let progressTimer: ReturnType<typeof setInterval> | null = null
-function startProgressSimulation() {
-  generateProgress.value = 0
-  generateStatus.value = '正在准备续写请求...'
-  progressTimer = setInterval(() => {
-    // 进度越接近 90% 增长越慢（模拟真实等待体验）
-    const remaining = 90 - generateProgress.value
-    if (remaining > 0) {
-      generateProgress.value += Math.max(0.5, remaining * 0.08)
-    }
-    // 根据进度更新状态文字
-    if (generateProgress.value < 20) {
-      generateStatus.value = '正在准备续写请求...'
-    } else if (generateProgress.value < 50) {
-      generateStatus.value = '正在请求 AI 服务...'
-    } else {
-      generateStatus.value = 'AI 正在生成内容...'
-    }
-  }, 200)
-}
-function stopProgressSimulation() {
-  if (progressTimer) {
-    clearInterval(progressTimer)
-    progressTimer = null
-  }
-}
-
 async function handleContinueWrite() {
   if (!novelStore.currentChapter) return
-  continueLoading.value = true
-  retries = 0
-  cancelRequested = false
+  resetRetry()
   showContinueResult.value = true
+  continueLoading.value = true
 
-  while (retries <= MAX_RETRIES) {
-    if (cancelRequested) {
-      closeDialog()
-      return
-    }
+  while (shouldRetry()) {
+    if (isCanceled()) { closeDialog(); return }
 
-    // 每次尝试清除上次残留内容
     continueResult.value = ''
     generateProgress.value = 0
-
-    if (retries > 0) {
-      generateStatus.value = `续写返回为空，自动重试 (${retries}/${MAX_RETRIES})...`
-    } else {
-      generateStatus.value = '正在准备续写请求...'
-    }
-
-    abortController = new AbortController()
-    startProgressSimulation()
+    startProgress('续写')
+    const signal = getSignal()
 
     try {
-      // 获取前一章内容作为剧情连续性上下文（新建续写章节时尤其重要）
       const chapters = novelStore.chapters
       const currentCh = novelStore.currentChapter; const curIdx = currentCh
         ? chapters.findIndex(c => c.id === currentCh.id)
         : -1
       const prevCh = curIdx > 0 ? chapters[curIdx - 1] : null
 
-      // 流式续写：onChunk 回调实时更新内容和进度
       const fullText = await aiApi.continueWrite(
         {
           chapterContent: htmlToPlainText(novelStore.currentChapter.content),
@@ -132,71 +73,43 @@ async function handleContinueWrite() {
           relationships: novelStore.currentNovel?.relationships,
           events: novelStore.currentNovel?.events,
         },
-        (fullText: string) => {
-          continueResult.value = normalizeParagraphs(fullText)
+        (text: string) => {
+          continueResult.value = normalizeParagraphs(text)
           if (generateProgress.value < 95) {
             generateProgress.value = Math.max(generateProgress.value, 70)
-            generateStatus.value = 'AI 正在生成内容...'
           }
         },
-        abortController.signal,
+        signal,
       )
-      stopProgressSimulation()
+      stopProgress()
 
       if (fullText) {
-        // 成功获取内容
         continueResult.value = normalizeParagraphs(fullText)
-        generateProgress.value = 100
-        generateStatus.value = '续写完成'
+        completeProgress('续写')
         continueLoading.value = false
-        abortController = null
         return
       }
 
-      // 返回空内容 → 重试
-      retries++
-
+      incrementRetry()
     } catch (e: any) {
-      stopProgressSimulation()
-      if (e.name === 'AbortError') {
-        // 取消时不弹提示
-        closeDialog()
-        return
-      }
-
-      // 请求出错，还有重试次数则继续
-      if (retries < MAX_RETRIES && !cancelRequested) {
-        retries++
-        generateStatus.value = `续写出错，自动重试 (${retries}/${MAX_RETRIES})...`
-        continue
-      }
-
-      // 重试用完，报错（如有部分内容则保留）
+      stopProgress()
+      if (e.name === 'AbortError') { closeDialog(); return }
+      if (shouldRetry() && !isCanceled()) { incrementRetry(); continue }
       message.error(`续写失败: ${e.message}`)
-      if (!continueResult.value) {
-        showContinueResult.value = false
-      } else {
-        generateProgress.value = 100
-        generateStatus.value = '续写出错（已保留部分内容）'
-      }
+      if (!continueResult.value) { showContinueResult.value = false }
+      else { errorProgress('续写') }
       continueLoading.value = false
-      abortController = null
       return
     }
   }
 
-  // 自动重试用完仍为空
   message.warning('AI 连续返回空内容，续写失败')
   showContinueResult.value = false
   continueLoading.value = false
-  abortController = null
 }
 
 function cancelContinue() {
-  cancelRequested = true
-  if (abortController) {
-    abortController.abort()
-  }
+  cleanupRequest()
 }
 
 function insertToChapterEnd() {
@@ -233,24 +146,12 @@ function copyResult() {
 }
 
 function closeDialog() {
-  // 如果正在加载，取消请求
-  if (continueLoading.value) {
-    cancelContinue()
-  }
-  stopProgressSimulation()
-  abortController = null
+  if (continueLoading.value) cancelContinue()
+  stopProgress()
   emit('update:show', false)
   continueRequirement.value = ''
   continueResult.value = ''
   showContinueResult.value = false
-  generateProgress.value = 0
-  generateStatus.value = ''
-}
-
-/** 重新续写：回到输入阶段，保留之前的要求文本 */
-function retryContinue() {
-  showContinueResult.value = false
-  continueResult.value = ''
   generateProgress.value = 0
   generateStatus.value = ''
 }
@@ -263,10 +164,12 @@ watch(() => props.refinedContent, (val: string | undefined) => {
   }
 })
 
-onUnmounted(() => {
-  stopProgressSimulation()
-  if (abortController) abortController.abort()
-})
+function retryContinue() {
+  showContinueResult.value = false
+  continueResult.value = ''
+  generateProgress.value = 0
+  generateStatus.value = ''
+}
 </script>
 
 <template>

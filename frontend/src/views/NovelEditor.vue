@@ -11,6 +11,8 @@ import { EDITOR_ACTIONS_KEY } from '../types/editor'
 import type { ExtractionResult } from '../types'
 import { useEditorAppearance } from '../composables/useEditorAppearance'
 import { useAutoSave } from '../composables/useAutoSave'
+import { useChapterSplit } from '../composables/useChapterSplit'
+import { toTiptapHtml, wordCount as wc, stripHtml } from '../utils/editor'
 import { setWindowTitle } from '../utils/windowTitle'
 import * as aiApi from '../api/ai'
 import ChapterSidebar from '../components/editor/ChapterSidebar.vue'
@@ -25,7 +27,7 @@ import NovelInfoDialog from '../components/editor/NovelInfoDialog.vue'
 import ExtractResultDialog from '../components/editor/ExtractResultDialog.vue'
 import { EditorContent, useEditor } from '@tiptap/vue-3'
 import { createDocument } from '@tiptap/core'
-import { DOMParser, DOMSerializer, Slice } from '@tiptap/pm/model'
+import { DOMParser, Slice } from '@tiptap/pm/model'
 import StarterKit from '@tiptap/starter-kit'
 import { NLayout, NText, NButton, NIcon, useMessage } from 'naive-ui'
 import { CutOutline as SplitIcon } from '@vicons/ionicons5'
@@ -101,7 +103,11 @@ const redoable = computed(() => editor.value?.can().redo() ?? false)
 
 // === 提供编辑器操作给 AI 弹框 ===
 provide(EDITOR_ACTIONS_KEY, {
-  setContent: (html: string) => setEditorContent(html),
+  setContent: (html: string) => {
+    editContent.value = html
+    contentChanged.value = true
+    editor.value?.commands.setContent(toTiptapHtml(html))
+  },
   getContent: () => editContent.value,
   markChanged: () => { contentChanged.value = true },
   getSelectionText: () => {
@@ -232,28 +238,7 @@ const { showSavedIndicator, triggerAutoSave, doSave, startPolling, stop: stopAut
   doSaveChapter,
 )
 
-// === HTML 转换 ===
-function toTiptapHtml(html: string): string {
-  if (!html) return ''
-  if (!/<\/?[a-z][\s\S]*?>/i.test(html)) {
-    return html.split(/\n\s*\n/).map(s => s.trim()).filter(Boolean).map(s => {
-      const withBr = s.replace(/\r?\n/g, '<br>')
-      return `<p>${withBr}</p>`
-    }).join('')
-  }
-  let out = html.replace(/<div/gi, '<p').replace(/<\/div\s*>/gi, '</p>')
-  if (/(?:<br\s*\/?>\s*){2,}/i.test(out)) {
-    const parts = out.split(/(?:<br\s*\/?>\s*){2,}/i).filter(s => s.trim())
-    if (parts.length > 1) out = parts.map(s => `<p>${s.trim()}</p>`).join('')
-  }
-  return out
-}
-
-function setEditorContent(text: string) {
-  editContent.value = text
-  contentChanged.value = true
-  editor.value?.commands.setContent(toTiptapHtml(text))
-}
+// HTML 转换函数已迁移至 utils/editor.ts
 
 // === 切换章节时同步编辑器（初始化时不执行） ===
 const isInitializing = ref(true)
@@ -284,9 +269,7 @@ function goBack() {
 }
 
 // === 字数统计 ===
-const wordCount = computed(() =>
-  (editContent.value.replace(/<[^>]*>/g, '').replace(/\s/g, '')).length,
-)
+const wordCount = computed(() => wc(editContent.value))
 
 // === 格式化解多余空段落 ===
 const canFormat = computed(() => {
@@ -299,98 +282,18 @@ function formatContent() {
   const formatted = editContent.value
     .replace(/<p>\s*<\/p>/gi, '')
     .replace(/<p>\s*<br\s*\/?>\s*<\/p>/gi, '')
-  if (formatted !== editContent.value) setEditorContent(formatted)
-}
-
-// === 拆分章节 ===
-const hasSelection = computed(() => {
-  const ed = editor.value
-  if (!ed) return false
-  const { from, to } = ed.state.selection
-  return from !== to
-})
-
-function getSelectedHtml(): string {
-  const ed = editor.value
-  if (!ed) return ''
-  const { state } = ed
-  const { from, to } = state.selection
-  if (from === to) return ''
-  const slice = state.doc.slice(from, to)
-  const serializer = DOMSerializer.fromSchema(state.schema)
-  const fragment = serializer.serializeFragment(slice.content)
-  const tempDiv = document.createElement('div')
-  tempDiv.appendChild(fragment)
-  return tempDiv.innerHTML
-}
-
-const showSplitDialog = ref(false)
-const splitChapterTitle = ref('')
-const splittingChapter = ref(false)
-
-function handleSplitClick() {
-  const ed = editor.value
-  const ch = currentChapter.value
-  if (!ed || !ch) return
-
-  const selectedHtml = getSelectedHtml()
-  if (!selectedHtml) {
-    message.warning('请先在正文中选择要拆分的文本')
-    return
+  if (formatted !== editContent.value) {
+    editContent.value = formatted
+    contentChanged.value = true
+    editor.value?.commands.setContent(toTiptapHtml(formatted))
   }
-
-  splitChapterTitle.value = `${ch.title || '新章'}（拆出）`
-  showSplitDialog.value = true
 }
 
-async function confirmSplit(title: string) {
-  const ed = editor.value
-  const ch = currentChapter.value
-  const n = novelStore.currentNovel
-  if (!ed || !ch || !n) return
-
-  if (!title) { message.warning('请输入章节标题'); return }
-
-  const selectedHtml = getSelectedHtml()
-  if (!selectedHtml) { message.warning('请先选择要拆分的文本'); return }
-
-  splittingChapter.value = true
-
-  // 1. 从当前章节删除选中内容
-  const { state, view } = ed
-  const tr = state.tr.deleteSelection()
-  view.dispatch(tr)
-  view.focus()
-  contentChanged.value = true
-  await doSaveChapter()
-
-  // 2. 创建新章节，临时放在末尾
-  const newCh = await novelStore.createChapter({
-    novelId: n.id,
-    title,
-    content: selectedHtml,
-    order: novelStore.chapters.length + 1,
-  })
-  if (!newCh) { message.error('创建章节失败'); splittingChapter.value = false; return }
-
-  // 3. 重新排序：将新章节放到当前章节之后
-  const currentIdx = novelStore.chapters.findIndex(c => c.id === ch.id)
-  const ids = novelStore.chapters.filter(c => c.id !== newCh.id).map(c => c.id)
-  ids.splice(currentIdx + 1, 0, newCh.id)
-  await novelStore.reorderChapters(n.id, ids)
-
-  // 4. 重新加载章节列表并跳转到新章节
-  await novelStore.loadChapters(n.id)
-  const found = novelStore.chapters.find(c => c.id === newCh.id)
-  if (found) novelStore.selectChapter(found)
-  showSplitDialog.value = false
-  splittingChapter.value = false
-  message.success('已拆分为新章节')
-}
-
-function cancelSplit() {
-  splitChapterTitle.value = ''
-}
+// === 拆分章节（逻辑由 useChapterSplit composable 管理） ===
+const {
+  showSplitDialog, splitChapterTitle, splittingChapter,
+  hasSelection, handleSplitClick, confirmSplit, cancelSplit,
+} = useChapterSplit(editor, doSaveChapter)
 
 // === 键盘快捷键 ===
 function handleKeydown(e: KeyboardEvent) {
@@ -510,19 +413,7 @@ function handleExport() {
   lines.push('')
 
   for (const ch of sorted) {
-    const plain = ch.content
-      .replace(/<\/p>/gi, '\n\n')      // 段落结束 → 双换行保留分段
-      .replace(/<br\s*\/?>/gi, '\n')   // <br> → 单换行
-      .replace(/<[^>]+>/g, '')         // 去其余 HTML 标签
-      .replace(/&nbsp;/g, ' ')
-      .replace(/&amp;/g, '&')
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/&quot;/g, '"')
-      .replace(/&#39;/g, "'")
-      .replace(/[ \t]+\n/g, '\n')      // 行尾空白
-      .replace(/\n{3,}/g, '\n\n')      // 最多保留两行空行
-      .trim()
+    const plain = stripHtml(ch.content)
 
     lines.push(ch.title || `第${ch.order}章`)
     lines.push('─'.repeat(24))

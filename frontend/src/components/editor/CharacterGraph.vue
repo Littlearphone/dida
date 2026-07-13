@@ -11,33 +11,7 @@ import { Network } from 'vis-network'
 import { DataSet } from 'vis-data'
 import type { Character, NovelRelationship } from '../../types'
 import { useNovelStore } from '../../stores/novel'
-
-
-/** vis-network 节点数据结构 */
-interface VisNodeItem {
-  id: number
-  label: string
-  title?: string
-  shape: string
-  size: number
-  font: { size: number; face: string; color?: string; multi?: boolean }
-  borderWidth: number
-  borderRadius?: number
-  margin?: { top: number; bottom: number; left: number; right: number }
-  color: { background: string; border: string; highlight: { background: string; border: string } }
-  shadow?: { enabled: boolean; color: string; size: number; x: number; y: number }
-}
-/** vis-network 边数据结构 */
-interface VisEdgeItem {
-  from: number
-  to: number
-  label?: string
-  title?: string
-  font: { size: number; align: string; color?: string }
-  smooth: { type: string; roundness: number }
-  color: { color: string; highlight: string }
-  width: number
-}
+import { buildNodes, buildEdges, DEFAULT_GRAPH_OPTIONS } from './graphUtils'
 
 const props = defineProps<{
   characters: Character[]
@@ -381,22 +355,6 @@ function scheduleResizeFit() {
   }, 150)
 }
 
-/** 基于名称生成节点颜色 */
-function nodeColor(name: string) {
-  const palette = [
-    { bg: '#e8f4f8', border: '#2980b9' },
-    { bg: '#fce4ec', border: '#c0392b' },
-    { bg: '#e8f5e9', border: '#27ae60' },
-    { bg: '#f3e5f5', border: '#8e44ad' },
-    { bg: '#fff3e0', border: '#d35400' },
-    { bg: '#e0f7fa', border: '#16a085' },
-    { bg: '#fffde7', border: '#d4ac0d' },
-    { bg: '#eceff1', border: '#546e7a' },
-  ]
-  const hash = name.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0)
-  return palette[hash % palette.length]
-}
-
 function buildGraph() {
   if (!containerRef.value) return
 
@@ -415,67 +373,16 @@ function buildGraph() {
   const chars = props.characters
   if (chars.length === 0) return
 
-  const nodeItems: VisNodeItem[] = chars.map((ch, i) => {
-    const c = nodeColor(ch.name)
-    return {
-      id: i,
-      label: ch.name,
-      title: [ch.alias, `「${ch.traits}」`, ch.description].filter(Boolean).join('\n'),
-      shape: 'box',
-      size: 30,
-      font: { size: 14, face: 'sans-serif', color: '#333', multi: false },
-      borderWidth: 2,
-      borderRadius: 8,
-      margin: { top: 8, bottom: 8, left: 12, right: 12 },
-      color: { background: c.bg, border: c.border, highlight: { background: c.bg, border: c.border } },
-      shadow: { enabled: true, color: 'rgba(0,0,0,0.1)', size: 4, x: 0, y: 2 },
-    }
-  })
+  const nodeItems = buildNodes(chars)
+  const edgeItems = buildEdges(chars, props.relationships)
 
-  const edgeItems: VisEdgeItem[] = []
-  // 从小说级平铺关系列表构建边（直接迭代，无重复）
-  if (props.relationships) {
-    for (const rel of props.relationships) {
-      const sourceIdx = chars.findIndex(c => c.name === rel.source)
-      const targetIdx = chars.findIndex(c => c.name === rel.target)
-      if (sourceIdx < 0 || targetIdx < 0) continue
-      edgeItems.push({
-        from: sourceIdx,
-        to: targetIdx,
-        label: rel.relationType,
-        title: rel.description || undefined,
-        font: { size: 12, align: 'middle', color: '#666' },
-        smooth: { type: 'curvedCW', roundness: 0.12 },
-        color: { color: '#888', highlight: '#2080f0' },
-        width: 2,
-      })
-    }
-  }
-
-  // 用 as any 绕过 vis-data 严格类型（边没有 id 字段，仅有 from/to）
   const nodes = new DataSet(nodeItems as any)
   const edges = new DataSet(edgeItems as any)
 
   network = new (Network as any)(
     containerRef.value,
-    // 使用类型断言绕过 vis 类型推断限制
     { nodes, edges } as any,
-    {
-      physics: {
-        enabled: true,
-        solver: 'barnesHut',
-        barnesHut: { gravitationalConstant: -2000, centralGravity: 0.3, springLength: 160, springConstant: 0.02 },
-        stabilization: { iterations: 300 },
-      },
-      layout: { improvedLayout: true },
-      interaction: {
-        hover: true,
-        tooltipDelay: 200,
-        zoomView: true,
-        dragView: true,
-      },
-      edges: { smooth: true },
-    },
+    DEFAULT_GRAPH_OPTIONS,
   )
 
   // 点击事件：编辑角色（连线模式下 canvas 已禁用指针事件，不会触发此处）

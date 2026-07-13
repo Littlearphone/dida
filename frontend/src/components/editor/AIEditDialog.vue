@@ -6,6 +6,8 @@ import {
 } from 'naive-ui'
 import { CopyOutline as CopyIcon, SyncOutline as ReplaceIcon, CloseOutline as CloseIcon } from '@vicons/ionicons5'
 import { useNovelStore } from '../../stores/novel'
+import { useAIStream } from '../../composables/useAIStream'
+import { htmlToPlainText, normalizeParagraphs } from '../../utils/editor'
 import * as aiApi from '../../api/ai'
 import { EDITOR_ACTIONS_KEY } from '../../types/editor'
 
@@ -25,63 +27,23 @@ const novelStore = useNovelStore()
 const message = useMessage()
 const editorActions = inject(EDITOR_ACTIONS_KEY)!
 
-/** 将 HTML 转为纯文本并保留段落结构（双换行分隔）
- *  对纯文本（无 HTML 标签）也归一化换行，确保段落结构不被吞掉 */
-function htmlToPlainText(html: string): string {
-  if (!/<\/?[a-z][\s\S]*?>/i.test(html)) {
-    // 已无 HTML 标签的纯文本，统一归一化换行
-    return normalizeParagraphs(html)
-  }
-  const div = document.createElement('div')
-  div.innerHTML = html
-  // 在每个块级元素后插入换行，保留段落分隔
-  div.querySelectorAll('p, div, h1, h2, h3, h4, h5, h6, li, blockquote').forEach(el => {
-    el.after('\n\n')
-  })
-  // <br> 转单换行
-  div.querySelectorAll('br').forEach(el => el.replaceWith('\n'))
-  return normalizeParagraphs(div.textContent || '')
-}
-
-/** 归一化段落换行：当 AI 返回的内容没有双换行但存在单换行时，将单换行视为段落分隔
- *  已有双换行时原样保留，避免流式中间状态尾部 \n\n 被过滤掉 */
-function normalizeParagraphs(text: string): string {
-  if (!text) return text
-  if (!/\n\n/.test(text) && /\n/.test(text)) {
-    return text.split(/\n+/).map(s => s.trim()).filter(Boolean).join('\n\n')
-  }
-  return text
-}
-
 const requirement = ref('')
-const loading = ref(false)
 const originalContent = ref('')
 const editResult = ref('')
 const showResult = ref(false)
-const editingResult = ref(false) // 结果预览区是否切换到编辑模式
-const progress = ref(0)
-const progressText = ref('')
-
-/** 自动检测：有选中文本就用选中，否则整章 */
+const editingResult = ref(false)
 const hasSelection = ref(false)
-/** 弹框打开时保存的选中文本 */
 const savedSelectionText = ref('')
 
-let abortController: AbortController | null = null
-let progressTimer: ReturnType<typeof setInterval> | null = null
-/** 自动重试：当 AI 返回空内容或请求出错时自动重试 */
-const MAX_RETRIES = 2
-let retries = 0
-let cancelRequested = false
+const {
+  loading, progress, progressText,
+  MAX_RETRIES,
+  getAbortSignal: getSignal, cleanupRequest, resetRetry,
+  shouldRetry, isCanceled, incrementRetry,
+  startProgressSimulation, stopProgressSimulation,
+  completeProgress, errorProgress,
+} = useAIStream()
 
-/** 清理 AI 请求相关资源 */
-function cleanupRequest() {
-  if (loading.value) cancelEdit()
-  stopProgressSimulation()
-  abortController = null
-}
-
-/** 重置所有对话框状态（不含 emit） */
 function resetState() {
   requirement.value = ''
   editResult.value = ''
@@ -90,8 +52,6 @@ function resetState() {
   editingResult.value = false
   hasSelection.value = false
   savedSelectionText.value = ''
-  progress.value = 0
-  progressText.value = ''
 }
 
 const title = computed(() => props.mode === 'polish' ? 'AI 润色' : 'AI 扩写')
@@ -118,36 +78,22 @@ function clearSelection() {
   savedSelectionText.value = ''
 }
 
-function startProgressSimulation() {
-  progress.value = 0
-  progressText.value = `正在准备${props.mode === 'polish' ? '润色' : '扩写'}请求...`
-  progressTimer = setInterval(() => {
-    const remaining = 90 - progress.value
-    if (remaining > 0) {
-      progress.value += Math.max(0.5, remaining * 0.08)
-    }
-    if (progress.value < 20) {
-      progressText.value = `正在准备${props.mode === 'polish' ? '润色' : '扩写'}请求...`
-    } else if (progress.value < 50) {
-      progressText.value = '正在请求 AI 服务...'
-    } else {
-      progressText.value = `AI 正在${props.mode === 'polish' ? '润色' : '扩写'}...`
-    }
-  }, 200)
+function startProgress(label: string) {
+  startProgressSimulation(props.mode === 'polish' ? '润色' : '扩写')
 }
-function stopProgressSimulation() {
-  if (progressTimer) {
-    clearInterval(progressTimer)
-    progressTimer = null
-  }
+
+function cancelEdit() {
+  cleanupRequest()
+}
+
+function stopProgress() {
+  stopProgressSimulation()
 }
 
 async function handleEdit() {
   loading.value = true
-  retries = 0
-  cancelRequested = false
+  resetRetry()
 
-  // 使用弹框打开时保存的选中文本，或整章内容，始终转为纯文本保留段落
   const rawContent = savedSelectionText.value
     ? savedSelectionText.value
     : (editorActions.getContent() || novelStore.currentChapter?.content || '')
@@ -160,27 +106,16 @@ async function handleEdit() {
   const apiFn = props.mode === 'polish' ? aiApi.polish : aiApi.expand
   const modeLabel = props.mode === 'polish' ? '润色' : '扩写'
 
-  while (retries <= MAX_RETRIES) {
-    if (cancelRequested) {
-      closeDialog()
-      return
-    }
+  while (shouldRetry()) {
+    if (isCanceled()) { closeDialog(); return }
 
-    // 每次尝试开始时清除上次残留内容
     editResult.value = ''
     progress.value = 0
+    startProgress(modeLabel)
 
-    if (retries > 0) {
-      progressText.value = `${modeLabel}返回为空，自动重试 (${retries}/${MAX_RETRIES})...`
-    } else {
-      progressText.value = `正在准备${modeLabel}请求...`
-    }
-
-    abortController = new AbortController()
-    startProgressSimulation()
+    const signal = getSignal()
 
     try {
-      // 获取前一章内容作为剧情上下文
       const chapters = novelStore.chapters
       const currentCh = novelStore.currentChapter; const curIdx = currentCh
         ? chapters.findIndex(c => c.id === currentCh.id)
@@ -198,71 +133,39 @@ async function handleEdit() {
           relationships: novelStore.currentNovel?.relationships,
           events: novelStore.currentNovel?.events,
         },
-        (fullText: string) => {
-          editResult.value = normalizeParagraphs(fullText)
+        (text: string) => {
+          editResult.value = normalizeParagraphs(text)
           if (progress.value < 95) {
             progress.value = Math.max(progress.value, 70)
-            progressText.value = `AI 正在${modeLabel}...`
           }
         },
-        abortController.signal,
+        signal,
       )
       stopProgressSimulation()
 
       if (fullText) {
-        // 成功拿到内容
         editResult.value = normalizeParagraphs(fullText)
-        progress.value = 100
-        progressText.value = `${modeLabel}完成`
+        completeProgress(modeLabel)
         loading.value = false
-        abortController = null
         return
       }
 
-      // 返回空内容 → 重试
-      retries++
-
+      incrementRetry()
     } catch (e: any) {
       stopProgressSimulation()
-      if (e.name === 'AbortError') {
-        // 取消或关闭时不弹提示
-        closeDialog()
-        return
-      }
-
-      // 请求出错，还有重试次数则继续
-      if (retries < MAX_RETRIES && !cancelRequested) {
-        retries++
-        progressText.value = `${modeLabel}出错，自动重试 (${retries}/${MAX_RETRIES})...`
-        continue
-      }
-
-      // 重试用完，报错
+      if (e.name === 'AbortError') { closeDialog(); return }
+      if (shouldRetry() && !isCanceled()) { incrementRetry(); continue }
       message.error(`${modeLabel}失败: ${e.message}`)
-      if (!editResult.value) {
-        showResult.value = false
-      } else {
-        progress.value = 100
-        progressText.value = `${modeLabel}出错（已保留部分内容）`
-      }
+      if (!editResult.value) { showResult.value = false }
+      else { errorProgress(modeLabel) }
       loading.value = false
-      abortController = null
       return
     }
   }
 
-  // 自动重试用完仍为空
   message.warning(`AI 连续返回空内容，${modeLabel}失败`)
   showResult.value = false
   loading.value = false
-  abortController = null
-}
-
-function cancelEdit() {
-  cancelRequested = true
-  if (abortController) {
-    abortController.abort()
-  }
 }
 
 function replaceContent() {
@@ -315,7 +218,7 @@ watch(() => props.show, (open) => {
 
 onUnmounted(() => {
   stopProgressSimulation()
-  if (abortController) abortController.abort()
+  cleanupRequest()
 })
 </script>
 
