@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { NButton, NText, NSpace, NTooltip } from 'naive-ui'
-import { SparklesOutline as SparklesIcon, ColorWandOutline as WandIcon, CreateOutline as ExpandIcon, SettingsOutline as AISetupIcon, InformationCircleOutline as InfoIcon, DocumentTextOutline as ExtractIcon } from '@vicons/ionicons5'
+import { SparklesOutline as SparklesIcon, ColorWandOutline as WandIcon, CreateOutline as ExpandIcon, SettingsOutline as AISetupIcon, InformationCircleOutline as InfoIcon, DocumentTextOutline as ExtractIcon, DownloadOutline as DownloadIcon } from '@vicons/ionicons5'
 
-const props = defineProps<{ wordCount: number; aiConfigured: boolean; contentChanged: boolean; extractLoading?: boolean }>()
+const props = defineProps<{ wordCount: number; aiConfigured: boolean; contentChanged: boolean; extractLoading?: boolean; novelTitle: string }>()
 const saveLabel = computed(() => props.contentChanged ? '未保存' : '已保存')
 const saveColor = computed(() => props.contentChanged ? '#e6a23c' : '#18a058')
 
@@ -15,6 +15,7 @@ const emit = defineEmits<{
   extract: []
   setupAI: []
   showInfo: []
+  export: []
 }>()
 </script>
 
@@ -26,6 +27,10 @@ const emit = defineEmits<{
     <n-button size="tiny" quaternary @click="emit('showInfo')" title="小说信息">
       <template #icon><n-icon size="14"><InfoIcon/></n-icon></template>
       <span style="font-size: 12px;">信息</span>
+    </n-button>
+    <n-button size="tiny" quaternary @click="emit('export')" title="导出整本小说">
+      <template #icon><n-icon size="14"><DownloadIcon/></n-icon></template>
+      <span style="font-size: 12px;">导出</span>
     </n-button>
     <template v-if="aiConfigured">
       <n-button size="small" type="primary" @click="emit('continue')">

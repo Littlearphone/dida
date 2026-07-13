@@ -119,6 +119,7 @@ func registerRoutes(mux *http.ServeMux, ss *store.SettingsStore, ns *store.Novel
 	mux.HandleFunc("POST /api/novels/import", novelHandler.HandleImport)
 	mux.HandleFunc("GET /api/novels/{id}/chapters", novelHandler.HandleGetChapters)
 	mux.HandleFunc("PUT /api/novels/{id}/chapters/reorder", novelHandler.HandleReorderChapters)
+	mux.HandleFunc("GET /api/novels/{id}/export", novelHandler.HandleExport)
 
 	// 章节 API
 	mux.HandleFunc("POST /api/chapters", chapterHandler.HandleCreate)

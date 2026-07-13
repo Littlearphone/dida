@@ -2,11 +2,39 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"regexp"
+	"strings"
 
 	"dida/models"
 	"dida/store"
 )
+
+// 编译时缓存 HTML 标签正则
+var htmlTagRegex = regexp.MustCompile(`<[^>]*>`)
+
+// stripHTML 去除 HTML 标签，将段落结构转为换行，解码常见实体
+func stripHTML(html string) string {
+	s := strings.ReplaceAll(html, "</p>", "\n\n") // 段落结束 → 双换行保留分段
+	s = strings.ReplaceAll(s, "<br>", "\n")
+	s = strings.ReplaceAll(s, "<br/>", "\n")
+	s = strings.ReplaceAll(s, "<br />", "\n")
+	s = htmlTagRegex.ReplaceAllString(s, "")
+	s = strings.ReplaceAll(s, "&nbsp;", " ")
+	s = strings.ReplaceAll(s, "&amp;", "&")
+	s = strings.ReplaceAll(s, "&lt;", "<")
+	s = strings.ReplaceAll(s, "&gt;", ">")
+	s = strings.ReplaceAll(s, "&quot;", "\"")
+	s = strings.ReplaceAll(s, "&#39;", "'")
+	// 清除行尾空白
+	spaceRe := regexp.MustCompile(`[ \t]+\n`)
+	s = spaceRe.ReplaceAllString(s, "\n")
+	// 最多保留两行空行
+	multiNewline := regexp.MustCompile(`\n{3,}`)
+	s = multiNewline.ReplaceAllString(s, "\n\n")
+	return strings.TrimSpace(s)
+}
 
 // NovelHandler 小说相关的HTTP请求处理器
 type NovelHandler struct {
@@ -194,6 +222,102 @@ func (h *NovelHandler) HandleReorderChapters(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// HandleExport 导出整本小说为纯文本
+// GET /api/novels/{id}/export?format=txt
+func (h *NovelHandler) HandleExport(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	novel := h.novelStore.GetNovel(id)
+	if novel == nil {
+		writeError(w, http.StatusNotFound, "小说不存在")
+		return
+	}
+
+	chapters := h.novelStore.GetChaptersByNovel(id)
+	if len(chapters) == 0 {
+		writeError(w, http.StatusBadRequest, "没有可导出的章节")
+		return
+	}
+
+	format := r.URL.Query().Get("format")
+	var content, filename, mimeType string
+
+	switch format {
+	case "markdown", "md":
+		mimeType = "text/markdown; charset=utf-8"
+		filename = sanitizeFilename(novel.Title) + ".md"
+		content = exportMarkdown(novel, chapters)
+	default:
+		mimeType = "text/plain; charset=utf-8"
+		filename = sanitizeFilename(novel.Title) + ".txt"
+		content = exportPlainText(novel, chapters)
+	}
+
+	w.Header().Set("Content-Type", mimeType)
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(content)))
+	w.Write([]byte(content))
+}
+
+// sanitizeFilename 去除文件名中的非法字符
+func sanitizeFilename(name string) string {
+	replacer := strings.NewReplacer(
+		"\\", "", "/", "", ":", "", "*", "",
+		"?", "", "\"", "", "<", "", ">", "", "|", "",
+	)
+	return strings.TrimSpace(replacer.Replace(name))
+}
+
+// exportPlainText 生成纯文本格式的完整小说内容
+func exportPlainText(novel *models.Novel, chapters []*models.Chapter) string {
+	var b strings.Builder
+
+	b.WriteString(novel.Title + "\n")
+	if novel.Author != "" {
+		b.WriteString("作者：" + novel.Author + "\n")
+	}
+	if novel.Description != "" {
+		b.WriteString("简介：" + novel.Description + "\n")
+	}
+	b.WriteString(strings.Repeat("━", 48) + "\n\n")
+
+	for _, ch := range chapters {
+		title := ch.Title
+		if title == "" {
+			title = fmt.Sprintf("第%d章", ch.Order)
+		}
+		b.WriteString(title + "\n")
+		b.WriteString(strings.Repeat("─", 24) + "\n\n")
+		b.WriteString(stripHTML(ch.Content) + "\n\n\n")
+	}
+
+	return b.String()
+}
+
+// exportMarkdown 生成 Markdown 格式的完整小说内容
+func exportMarkdown(novel *models.Novel, chapters []*models.Chapter) string {
+	var b strings.Builder
+
+	b.WriteString("# " + novel.Title + "\n\n")
+	if novel.Author != "" {
+		b.WriteString("**作者：** " + novel.Author + "\n\n")
+	}
+	if novel.Description != "" {
+		b.WriteString("> " + novel.Description + "\n\n")
+	}
+	b.WriteString("---\n\n")
+
+	for _, ch := range chapters {
+		title := ch.Title
+		if title == "" {
+			title = fmt.Sprintf("第%d章", ch.Order)
+		}
+		b.WriteString("## " + title + "\n\n")
+		b.WriteString(stripHTML(ch.Content) + "\n\n")
+	}
+
+	return b.String()
 }
 
 // 通用JSON响应写入

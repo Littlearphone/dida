@@ -182,8 +182,8 @@ async function handleEdit() {
     try {
       // 获取前一章内容作为剧情上下文
       const chapters = novelStore.chapters
-      const curIdx = novelStore.currentChapter
-        ? chapters.findIndex(c => c.id === novelStore.currentChapter.id)
+      const currentCh = novelStore.currentChapter; const curIdx = currentCh
+        ? chapters.findIndex(c => c.id === currentCh.id)
         : -1
       const prevCh = curIdx > 0 ? chapters[curIdx - 1] : null
 
