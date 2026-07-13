@@ -66,7 +66,6 @@ export function useGraphNetwork(
       if (connectMode.value) return
       if (params.nodes.length === 0) return
       const nodeIdx = params.nodes[0] as number
-      // 通过回调通知父组件打开编辑
       onNodeClick(nodeIdx)
     })
 
@@ -75,24 +74,23 @@ export function useGraphNetwork(
       network?.fit({ animation: true })
       network?.setOptions({ physics: { enabled: false } })
       if (wasConnect) nextTick(enterConnectMode)
-      nextTick(() => onGraphBuilt?.())
+      nextTick(() => onAfterBuild?.())
     })
 
     nextTick(updateSvgViewBox)
   }
 
-  /** 节点点击回调，由使用者设置 */
   let onNodeClick = (_nodeIdx: number) => {}
 
   function setOnNodeClick(cb: (idx: number) => void) {
     onNodeClick = cb
   }
 
-  /** 图构建完成回调（角色变更重建后，用于恢复布局） */
-  let onGraphBuilt: (() => void) | null = null
+  /** 构建完成回调（角色变更重建后恢复布局） */
+  let onAfterBuild: (() => void) | null = null
 
-  function setOnGraphBuilt(cb: () => void) {
-    onGraphBuilt = cb
+  function setOnAfterBuild(cb: () => void) {
+    onAfterBuild = cb
   }
 
   function ensureGraphBuilt() {
@@ -111,18 +109,9 @@ export function useGraphNetwork(
     }, 100)
   }
 
-  /**
-   * 切换布局模式
-   * @param options 完整布局配置，含 physics/layout/edges 等
-   */
-  function reLayout(options?: Record<string, any>) {
-    if (!network) return
-    const isHierarchical = options?.layout?.hierarchical?.enabled
-    network.setOptions(options || { physics: { enabled: true } })
-    if (isHierarchical) {
-      network.fit({ animation: true })
-      updateSvgViewBox()
-    } else {
+  function reLayout() {
+    if (network) {
+      network.setOptions({ physics: { enabled: true } })
       network.once('stabilizationIterationsDone', () => {
         network?.fit({ animation: true })
         network?.setOptions({ physics: { enabled: false } })
@@ -131,31 +120,8 @@ export function useGraphNetwork(
     }
   }
 
-  /**
-   * 固定节点位置并切换边样式（用于网格/环状等自定义布局）
-   */
-  function applyFixedLayout(
-    positions: { x: number; y: number }[],
-    edgeSmooth: { type: string; roundness?: number },
-  ) {
-    if (!network) return
-    // 逐个设置节点位置并固定
-    positions.forEach((p, i) => {
-      network.moveNode(i, p.x, p.y)
-    })
-    // 关闭物理引擎并切换边样式
-    network.setOptions({
-      physics: { enabled: false },
-      edges: { smooth: edgeSmooth },
-      layout: { hierarchical: { enabled: false } },
-    })
-    network.fit({ animation: true, padding: 40 })
-    updateSvgViewBox()
-  }
-
   function getNetwork() { return network }
 
-  // 监听角色/关系变化重建
   watch(() => characters.value, () => nextTick(scheduleRebuild), { deep: true })
   watch(() => relationships.value, () => nextTick(scheduleRebuild), { deep: true })
 
@@ -187,9 +153,8 @@ export function useGraphNetwork(
     svgViewBox,
     getNetwork,
     setOnNodeClick,
-    setOnGraphBuilt,
+    setOnAfterBuild,
     ensureGraphBuilt,
     reLayout,
-    applyFixedLayout,
   }
 }

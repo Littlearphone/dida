@@ -312,6 +312,8 @@ function confirmMerge() {
 // === 环状布局 ===
 /** 应用环状排列 + 折线连接 */
 function applyCircleLayout() {
+  const net = getNetwork()
+  if (!net) return
   const el = containerRef.value
   if (!el) return
   const rect = el.getBoundingClientRect()
@@ -324,7 +326,10 @@ function applyCircleLayout() {
     const angle = (2 * Math.PI * i) / count - Math.PI / 2
     return { x: cx + radius * Math.cos(angle), y: cy + radius * Math.sin(angle) }
   })
-  applyFixedLayout(positions, { type: 'discrete', roundness: 0 })
+  // 逐个设置节点位置，关闭物理引擎，切换为直角折线
+  positions.forEach((p, i) => net.moveNode(i, p.x, p.y))
+  net.setOptions({ physics: { enabled: false }, edges: { smooth: { type: 'discrete', roundness: 0 } } })
+  net.fit({ animation: true, padding: 40 })
 }
 
 // === 图谱 ===
@@ -332,17 +337,16 @@ const {
   svgViewBox,
   getNetwork,
   setOnNodeClick,
-  setOnGraphBuilt,
+  setOnAfterBuild,
   ensureGraphBuilt,
   reLayout,
-  applyFixedLayout,
 } = useGraphNetwork(containerRef, chars, rels, connectMode, cancelConnect, enterConnectMode)
 
 // 注册节点点击回调（打开编辑弹框）
 setOnNodeClick((idx: number) => openEdit(idx))
 
 // 图重建后自动恢复环状布局
-setOnGraphBuilt(() => { nextTick(applyCircleLayout) })
+setOnAfterBuild(() => { nextTick(applyCircleLayout) })
 
 onUnmounted(() => {
   removeDragListeners()

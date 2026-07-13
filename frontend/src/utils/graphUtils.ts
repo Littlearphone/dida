@@ -104,7 +104,6 @@ export const DEFAULT_GRAPH_OPTIONS = {
   layout: { improvedLayout: true },
   interaction: {
     hover: true,
-    hoverConnectedEdges: false,
     tooltipDelay: 200,
     zoomView: true,
     dragView: true,
