@@ -40,6 +40,24 @@ cd backend && go run .    # 终端2：Go 后端（需要先构建前端）
 - 构建前端前需要 `pnpm install`
 - 生产构建 `dida.exe` 在项目根目录，已加入 `.gitignore`
 
+## 组件拆分规则（硬性约束）
+
+### 文件行数阈值
+- **脚本（`<script setup>`）超过 200 行** → 必须提取 composable
+- **整个 `.vue` 文件超过 300 行** → 必须拆分子组件或提取 composable
+- **例外**: 模板偏大但逻辑简单的组件（如表单），可放宽到 400 行
+
+### 拆分优先级
+1. **逻辑提取** → 优先拆到 composable（`src/composables/use*.ts`）
+2. **模板提取** → 其次拆为子组件（`src/components/`）
+3. **样式提取** → 全局样式放 `src/assets/global.css`，组件内样式用 `<style lang="scss" scoped>`
+
+### 异步组件
+- **所有弹框（modal/dialog）必须注册为全局异步组件**，方式：
+  1. 在 `src/utils/registerComponents.ts` 中用 `defineAsyncComponent` 注册
+  2. 模板中直接用 PascalCase 标签名，无需 import
+- 始终渲染的组件保持静态 import，便于类型推断和 IDE 支持
+
 ## 编辑器操作注意事项
 
 ### Undo / Redo
@@ -58,10 +76,10 @@ cd backend && go run .    # 终端2：Go 后端（需要先构建前端）
 
 ## AI 编辑对话框关键逻辑
 - `AIEditDialog.vue` — 润色/扩写共用组件，通过 `mode` prop 区分
-- **选中检测**: `checkSelection()` 基于 ProseMirror 选区状态（不受 DOM 焦点影响）
-- **状态重置**: `watch(show)` 的 else 分支 + `closeDialog()` 双重兜底，确保 Escape 等非按钮关闭方式也重置状态
-- **结果编辑**: 结果展示区使用 `<n-input type="textarea" v-model:value="editResult">`，可直接修改 AI 输出后再替换
-- **选中清除**: 选中预览区提供 X 关闭按钮（`clearSelection()`），可取消选中改用整章内容
+- 选中检测：`checkSelection()` 基于 ProseMirror 选区状态（不受 DOM 焦点影响）
+- 状态重置：`watch(show)` 的 else 分支 + `closeDialog()` 双重兜底，确保 Escape 等非按钮关闭方式也重置状态
+- 结果编辑：结果展示区使用 `<n-input type="textarea" v-model:value="editResult">`，可直接修改 AI 输出后再替换
+- 选中清除：选中预览区提供 X 关闭按钮（`clearSelection()`），可取消选中改用整章内容
 
 ## 组件样式规范
 
@@ -75,6 +93,11 @@ cd backend && go run .    # 终端2：Go 后端（需要先构建前端）
   ```
 - 对于文本渐显动画（hover 时 max-width 过渡），使用 `:deep(.n-button__content > span:last-child)` 选择器定位按钮文本。注意 flex 子元素需添加 `min-width: 0; flex-shrink: 1;` 才能让 `max-width` 收缩生效
 - **CSS 变量优先**: 自定义 NaiveUI 组件样式时优先使用 `--n-*` CSS 变量覆盖，其次使用 `:deep()` 穿透，避免直接覆盖全局类名
+
+### SCSS 嵌套
+- 所有 `<style>` 块使用 `<style lang="scss" scoped>`
+- 有父子/状态关系的选择器必须用 `&` 嵌套（如 `&.active`、`.child { ... }`）
+- 纯平铺的同级选择器无需强行嵌套
 
 ## 开发规则
 
