@@ -8,7 +8,9 @@ import {
   NSpace, useMessage, NEmpty, NText,
 } from 'naive-ui'
 import {
-  AddOutline as AddIcon, TrashOutline as DeleteIcon,
+  AddOutline as AddIcon, GitMergeOutline as MergeIcon,
+  RefreshOutline as ReloadIcon, LinkOutline as LinkIcon,
+  TrashOutline as DeleteIcon,
 } from '@vicons/ionicons5'
 import type { Character, NovelRelationship } from '../../types'
 import { useNovelStore } from '../../stores/novel'
@@ -206,17 +208,141 @@ function confirmConnect() {
   resetConnectState()
 }
 
+// === 合并角色 ===
+const showMergeDialog = ref(false)
+const mergeTargetIdx = ref<number | null>(null)
+const mergeSourceIdxs = ref<number[]>([])
+
+/** 角色选择选项（用于合并对话框） */
+const charOptions = computed(() =>
+  props.characters.map((c, i) => ({ label: c.name, value: i })),
+)
+
+function openMergeDialog() {
+  mergeTargetIdx.value = null
+  mergeSourceIdxs.value = []
+  showMergeDialog.value = true
+}
+
+function confirmMerge() {
+  if (mergeTargetIdx.value === null) {
+    message.warning('请选择目标角色')
+    return
+  }
+  if (mergeSourceIdxs.value.length === 0) {
+    message.warning('请选择要合并的角色')
+    return
+  }
+
+  const target = props.characters[mergeTargetIdx.value]
+  const targetName = target.name
+
+  // 过滤掉目标自身，避免自合并
+  const sources = mergeSourceIdxs.value
+    .filter(i => i !== mergeTargetIdx.value)
+    .map(i => props.characters[i])
+  if (sources.length === 0) {
+    message.warning('目标角色不能同时作为被合并角色')
+    return
+  }
+
+  const sourceNames = sources.map(s => s.name)
+
+  // 收集被合并角色的元数据
+  const sourceAliases = sources.map(s => s.alias).filter(Boolean) as string[]
+  const sourceTraits = sources.map(s => s.traits).filter(Boolean) as string[]
+  const sourceDescs = sources.map(s => s.description).filter(Boolean) as string[]
+
+  // 更新角色列表：保留目标，移除源角色
+  const newChars = props.characters.filter(
+    (_, i) => i === mergeTargetIdx.value || !mergeSourceIdxs.value.includes(i),
+  )
+
+  // 合并元数据到目标角色（逐项去重）
+  const targetIdx = newChars.findIndex(c => c.name === targetName)
+  if (targetIdx >= 0) {
+    const merged = { ...newChars[targetIdx] }
+    if (sourceAliases.length) {
+      const parts = [merged.alias, ...sourceAliases]
+        .filter(Boolean)
+        .flatMap(s => (s as string).split(/[、，,]/).map(x => x.trim()).filter(Boolean))
+      merged.alias = [...new Set(parts)].join('、')
+    }
+    if (sourceTraits.length) {
+      const parts = [merged.traits, ...sourceTraits]
+        .filter(Boolean)
+        .flatMap(s => (s as string).split(/[、，,]/).map(x => x.trim()).filter(Boolean))
+      merged.traits = [...new Set(parts)].join('、')
+    }
+    if (sourceDescs.length) {
+      // 过滤掉与目标描述完全相同的段落，再按行去重
+      const uniqueDescs = sourceDescs.filter(d => d !== merged.description)
+      const lines = [merged.description, ...uniqueDescs]
+        .filter(Boolean)
+        .flatMap(s => (s as string).split('\n').map(x => x.trim()).filter(Boolean))
+      merged.description = [...new Set(lines)].join('\n')
+    }
+    newChars[targetIdx] = merged
+  }
+
+  // 重映射关系：将被合并角色的名称替换为目标角色名称
+  let newRels = (props.relationships || []).map(r => {
+    if (sourceNames.includes(r.source)) r = { ...r, source: targetName }
+    if (sourceNames.includes(r.target)) r = { ...r, target: targetName }
+    return r
+  })
+
+  // 去重：同 source-target-type 合并为一条，排除自引用
+  const seen = new Set<string>()
+  newRels = newRels.filter(r => {
+    if (r.source === r.target) return false // 自引用关系无效
+    const key = `${r.source}||${r.target}||${r.relationType}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+
+  emit('update:characters', newChars)
+  emit('update:relationships', newRels)
+  showMergeDialog.value = false
+  autoSave(newChars, newRels)
+  message.success(`已合并 ${sources.length} 个角色到「${targetName}」`)
+}
+
+// === 环状布局 ===
+/** 应用环状排列 + 折线连接 */
+function applyCircleLayout() {
+  const el = containerRef.value
+  if (!el) return
+  const rect = el.getBoundingClientRect()
+  const count = props.characters.length
+  if (count < 2) return
+  const cx = rect.width / 2
+  const cy = rect.height / 2
+  const radius = Math.min(cx, cy) - 80
+  const positions = props.characters.map((_, i) => {
+    const angle = (2 * Math.PI * i) / count - Math.PI / 2
+    return { x: cx + radius * Math.cos(angle), y: cy + radius * Math.sin(angle) }
+  })
+  applyFixedLayout(positions, { type: 'discrete', roundness: 0 })
+}
+
 // === 图谱 ===
 const {
   svgViewBox,
   getNetwork,
   setOnNodeClick,
+  setOnGraphBuilt,
   ensureGraphBuilt,
   reLayout,
+  applyFixedLayout,
 } = useGraphNetwork(containerRef, chars, rels, connectMode, cancelConnect, enterConnectMode)
 
 // 注册节点点击回调（打开编辑弹框）
 setOnNodeClick((idx: number) => openEdit(idx))
+
+// 图重建后自动恢复环状布局
+setOnGraphBuilt(() => { nextTick(applyCircleLayout) })
 
 onUnmounted(() => {
   removeDragListeners()
@@ -227,18 +353,38 @@ onUnmounted(() => {
   <div class="graph-wrapper">
     <!-- 顶部工具栏 -->
     <div class="graph-toolbar">
-      <n-button size="small" type="primary" @click="openAdd">
-        <template #icon><n-icon><AddIcon/></n-icon></template>添加角色
-      </n-button>
-      <n-button size="small" secondary @click="reLayout" :disabled="!getNetwork()">
-        重新布局
-      </n-button>
-      <n-button size="small" :type="connectMode ? 'warning' : 'default' as any" @click="handleConnectClick" :disabled="characters.length === 0">
-        连线
-      </n-button>
-      <n-text v-if="characters.length > 0" depth="3" style="font-size: 13px;">
-        {{ characters.length }} 个角色 · 点击节点编辑 · 拖拽连线建关系
-      </n-text>
+      <div class="toolbar-actions">
+        <n-button class="toolbar-btn" size="small" secondary @click="openAdd">
+          <template #icon><n-icon><AddIcon/></n-icon></template>添加角色
+        </n-button>
+        <n-button class="toolbar-btn" size="small" secondary
+          :class="{ active: connectMode }"
+          @click="handleConnectClick"
+          :disabled="characters.length === 0">
+          <template #icon><n-icon><LinkIcon/></n-icon></template>{{ connectMode ? '退出连线' : '连线' }}
+        </n-button>
+        <n-button class="toolbar-btn" size="small" secondary
+          @click="openMergeDialog"
+          :disabled="characters.length < 2">
+          <template #icon><n-icon><MergeIcon/></n-icon></template>合并
+        </n-button>
+        <n-button class="toolbar-btn" size="small" secondary
+          @click="applyCircleLayout"
+          :disabled="!getNetwork()">
+          <template #icon><n-icon><ReloadIcon/></n-icon></template>重新布局
+        </n-button>
+      </div>
+      <div class="toolbar-info">
+        <n-text v-if="characters.length > 0" depth="3" style="font-size: 13px;">
+          {{ characters.length }} 个角色
+        </n-text>
+      </div>
+    </div>
+
+    <!-- 连线模式横幅 -->
+    <div v-if="connectMode" class="connect-banner">
+      <span>🔗 连线模式 — 从节点拖拽到目标角色建立关系</span>
+      <n-button size="tiny" text style="color: #fff; text-decoration: underline;" @click="cancelConnect">退出连线</n-button>
     </div>
 
     <!-- vis-network 画布 + SVG 拖拽叠加层 -->
@@ -269,7 +415,7 @@ onUnmounted(() => {
 
     <!-- 角色编辑弹框 -->
     <n-modal class="dialog-modal" :show="showEdit" title="编辑角色" preset="card"
-      style="width: 520px;" :mask-closable="false" draggable
+      style="width: 520px; max-height: 88vh;" :mask-closable="false" draggable
       @update:show="showEdit = $event">
       <n-form label-placement="top">
         <n-form-item label="角色名称" required>
@@ -335,6 +481,35 @@ onUnmounted(() => {
         </n-space>
       </template>
     </n-modal>
+
+    <!-- 合并角色弹框 -->
+    <n-modal :show="showMergeDialog" title="合并角色" preset="card"
+      style="width: 480px;" :mask-closable="false" draggable
+      @update:show="showMergeDialog = $event">
+      <n-form label-placement="top">
+        <n-form-item label="目标角色（合并到该角色）" required>
+          <n-select v-model:value="mergeTargetIdx" :options="charOptions" placeholder="选择保留的角色" filterable />
+        </n-form-item>
+        <n-form-item label="被合并角色（将被移除）" required>
+          <n-select
+            v-model:value="mergeSourceIdxs"
+            :options="charOptions"
+            placeholder="选择要合并进来的角色"
+            multiple filterable
+            :disabled="mergeTargetIdx === null"
+          />
+        </n-form-item>
+        <n-text depth="3" style="font-size: 12px;">
+          提示：被合并角色的别名、特征和描述会合并到目标角色，涉及的关系会自动重映射
+        </n-text>
+      </n-form>
+      <template #footer>
+        <n-space justify="end">
+          <n-button quaternary @click="showMergeDialog = false">取消</n-button>
+          <n-button type="primary" @click="confirmMerge">确认合并</n-button>
+        </n-space>
+      </template>
+    </n-modal>
   </div>
 </template>
 
@@ -350,8 +525,38 @@ onUnmounted(() => {
   flex-shrink: 0;
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin-bottom: 12px;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.toolbar-btn { --n-border-color: #d9d9d9; }
+
+.toolbar-btn.active {
+  --n-text-color: #2080f0 !important;
+  --n-border-color: #2080f0 !important;
+  --n-color: #ecf5ff !important;
+}
+
+.toolbar-info { flex-shrink: 0; }
+
+/* 连线模式横幅 */
+.connect-banner {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 14px;
+  margin-bottom: 10px;
+  background: #2080f0;
+  color: #fff;
+  border-radius: 6px;
+  font-size: 13px;
 }
 
 /* vis-network 画布容器 */
@@ -413,5 +618,10 @@ onUnmounted(() => {
   align-items: center;
   gap: 10px;
   width: 100%;
+}
+
+/* 弹框内容溢出滚动 */
+.dialog-modal :deep(.n-card__content) {
+  overflow-y: auto;
 }
 </style>

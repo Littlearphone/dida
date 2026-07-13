@@ -6,7 +6,7 @@ import { ref, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { Network } from 'vis-network'
 import { DataSet } from 'vis-data'
 import type { Character, NovelRelationship } from '../types'
-import { buildNodes, buildEdges, DEFAULT_GRAPH_OPTIONS } from '../components/editor/graphUtils'
+import { buildNodes, buildEdges, DEFAULT_GRAPH_OPTIONS } from '../utils/graphUtils'
 
 export function useGraphNetwork(
   containerRef: { value: HTMLDivElement | undefined },
@@ -75,6 +75,7 @@ export function useGraphNetwork(
       network?.fit({ animation: true })
       network?.setOptions({ physics: { enabled: false } })
       if (wasConnect) nextTick(enterConnectMode)
+      nextTick(() => onGraphBuilt?.())
     })
 
     nextTick(updateSvgViewBox)
@@ -85,6 +86,13 @@ export function useGraphNetwork(
 
   function setOnNodeClick(cb: (idx: number) => void) {
     onNodeClick = cb
+  }
+
+  /** 图构建完成回调（角色变更重建后，用于恢复布局） */
+  let onGraphBuilt: (() => void) | null = null
+
+  function setOnGraphBuilt(cb: () => void) {
+    onGraphBuilt = cb
   }
 
   function ensureGraphBuilt() {
@@ -103,15 +111,46 @@ export function useGraphNetwork(
     }, 100)
   }
 
-  function reLayout() {
-    if (network) {
-      network.setOptions({ physics: { enabled: true } })
+  /**
+   * 切换布局模式
+   * @param options 完整布局配置，含 physics/layout/edges 等
+   */
+  function reLayout(options?: Record<string, any>) {
+    if (!network) return
+    const isHierarchical = options?.layout?.hierarchical?.enabled
+    network.setOptions(options || { physics: { enabled: true } })
+    if (isHierarchical) {
+      network.fit({ animation: true })
+      updateSvgViewBox()
+    } else {
       network.once('stabilizationIterationsDone', () => {
         network?.fit({ animation: true })
         network?.setOptions({ physics: { enabled: false } })
         updateSvgViewBox()
       })
     }
+  }
+
+  /**
+   * 固定节点位置并切换边样式（用于网格/环状等自定义布局）
+   */
+  function applyFixedLayout(
+    positions: { x: number; y: number }[],
+    edgeSmooth: { type: string; roundness?: number },
+  ) {
+    if (!network) return
+    // 逐个设置节点位置并固定
+    positions.forEach((p, i) => {
+      network.moveNode(i, p.x, p.y)
+    })
+    // 关闭物理引擎并切换边样式
+    network.setOptions({
+      physics: { enabled: false },
+      edges: { smooth: edgeSmooth },
+      layout: { hierarchical: { enabled: false } },
+    })
+    network.fit({ animation: true, padding: 40 })
+    updateSvgViewBox()
   }
 
   function getNetwork() { return network }
@@ -148,7 +187,9 @@ export function useGraphNetwork(
     svgViewBox,
     getNetwork,
     setOnNodeClick,
+    setOnGraphBuilt,
     ensureGraphBuilt,
     reLayout,
+    applyFixedLayout,
   }
 }

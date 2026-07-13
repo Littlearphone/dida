@@ -85,11 +85,14 @@ export function useCharacterEdit(
     }
     const charName = editName.value.trim()
     const list = [...characters.value]
+    // 对别名/特征/描述做逐项去重，清理历史遗留的重复内容
+    const dedupParts = (val: string, sep: RegExp) =>
+      [...new Set(val.split(sep).map(s => s.trim()).filter(Boolean))].join(sep.source === '\\n' ? '\n' : '、')
     const ch: Character = {
       name: charName,
-      alias: editAlias.value.trim() || undefined,
-      traits: editTraits.value.trim() || undefined,
-      description: editDesc.value.trim() || undefined,
+      alias: editAlias.value.trim() ? dedupParts(editAlias.value.trim(), /[、，,]/) : undefined,
+      traits: editTraits.value.trim() ? dedupParts(editTraits.value.trim(), /[、，,]/) : undefined,
+      description: editDesc.value.trim() ? dedupParts(editDesc.value.trim(), /\n/) : undefined,
     }
     if (editingIndex.value >= 0) {
       list[editingIndex.value] = ch

@@ -1,7 +1,7 @@
 /**
  * vis-network 角色关系图配置与节点数据生成工具
  */
-import type { Character, NovelRelationship } from '../../types'
+import type { Character, NovelRelationship } from '../types'
 
 /** 节点颜色方案 */
 const COLOR_PALETTE = [
@@ -104,6 +104,7 @@ export const DEFAULT_GRAPH_OPTIONS = {
   layout: { improvedLayout: true },
   interaction: {
     hover: true,
+    hoverConnectedEdges: false,
     tooltipDelay: 200,
     zoomView: true,
     dragView: true,
