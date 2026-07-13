@@ -1,36 +1,30 @@
 <script setup lang="ts">
 /**
  * 小说编辑器 — 核心视图
- * 组合子组件：ChapterSidebar / EditorToolbar / SearchReplacePanel / EditorStatusBar + AI 弹框
+ * 组合子组件：ChapterSidebar / EditorToolbar / EditorContentArea / SearchReplacePanel / EditorStatusBar + AI 弹框
  */
 import { computed, nextTick, onMounted, onUnmounted, provide, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useNovelStore } from '../stores/novel'
 import { useSettingsStore } from '../stores/settings'
 import { EDITOR_ACTIONS_KEY } from '../types/editor'
-import type { ExtractionResult } from '../types'
 import { useEditorAppearance } from '../composables/useEditorAppearance'
 import { useAutoSave } from '../composables/useAutoSave'
 import { useChapterSplit } from '../composables/useChapterSplit'
-import { toTiptapHtml, wordCount as wc, stripHtml } from '../utils/editor'
+import { useExport } from '../composables/useExport'
+import { useAIDialogs } from '../composables/useAIDialogs'
+import { toTiptapHtml, wordCount as wc } from '../utils/editor'
 import { setWindowTitle } from '../utils/windowTitle'
-import * as aiApi from '../api/ai'
 import ChapterSidebar from '../components/editor/ChapterSidebar.vue'
 import EditorToolbar from '../components/editor/EditorToolbar.vue'
+import EditorContentArea from '../components/editor/EditorContentArea.vue'
 import EditorStatusBar from '../components/editor/EditorStatusBar.vue'
 import SearchReplacePanel from '../components/editor/SearchReplacePanel.vue'
-import SplitChapterDialog from '../components/editor/SplitChapterDialog.vue'
-import AIContinueDialog from '../components/editor/AIContinueDialog.vue'
-import AIEditDialog from '../components/editor/AIEditDialog.vue'
-import AISetupDialog from '../components/editor/AISetupDialog.vue'
-import NovelInfoDialog from '../components/editor/NovelInfoDialog.vue'
-import ExtractResultDialog from '../components/editor/ExtractResultDialog.vue'
-import { EditorContent, useEditor } from '@tiptap/vue-3'
+import { useEditor } from '@tiptap/vue-3'
 import { createDocument } from '@tiptap/core'
 import { DOMParser, Slice } from '@tiptap/pm/model'
 import StarterKit from '@tiptap/starter-kit'
-import { NLayout, NText, NButton, NIcon, useMessage } from 'naive-ui'
-import { CutOutline as SplitIcon } from '@vicons/ionicons5'
+import { NLayout, useMessage } from 'naive-ui'
 
 const route = useRoute()
 const router = useRouter()
@@ -138,87 +132,17 @@ provide(EDITOR_ACTIONS_KEY, {
   triggerExtract: () => { nextTick(() => handlePostInsertExtract()) },
 })
 
-// === AI 续写后自动提取元数据 ===
-async function handlePostInsertExtract() {
-  const n = novelStore.currentNovel
-  if (!currentChapter.value || !n || !settingsStore.settings?.aiConfigured) return
+// === AI 弹框 & 提取 ===
+const {
+  showContinueWrite, showAIEdit, showAISetup, showNovelInfo,
+  showExtractResult, extractResult, extractLoading,
+  aiEditMode, pendingEditContent, refinedContinueResult, aiConfigured,
+  openAIEdit, handleContinueEdit, handleReplaceExternal,
+  handlePostInsertExtract, handleExtractSupplement,
+} = useAIDialogs(novelStore, settingsStore, editor, contentChanged, doSaveChapter, message)
 
-  if (contentChanged.value) await doSaveChapter()
-  const ch = currentChapter.value
-  if (!ch) return
-
-  extractLoading.value = true
-  const loadingMsg = message.loading('正在提取章节元数据...', { duration: 0 })
-  try {
-    const result = await aiApi.extractInfo({
-      chapters: [{
-        id: ch.id,
-        title: ch.title || '',
-        content: ch.content,
-        order: ch.order,
-      }],
-      existingOutline: n.outline,
-      existingCharacters: n.characters,
-      existingRelations: n.relationships,
-      existingEvents: n.events,
-    })
-    loadingMsg.destroy()
-    showExtractResult.value = true
-    extractResult.value = result
-  } catch (e: unknown) {
-    loadingMsg.destroy()
-    console.warn('AI 提取元数据失败:', e instanceof Error ? e.message : e)
-    message.warning('AI 元数据提取未完成，不影响已有内容')
-  } finally {
-    extractLoading.value = false
-  }
-}
-
-/** 手动提取/补充元数据 */
-async function handleExtractSupplement() {
-  const ch = currentChapter.value
-  const n = novelStore.currentNovel
-  if (!ch || !n) { message.warning('没有可分析的章节内容'); return }
-
-  let contentToExtract: string
-  if (editor.value) {
-    const { from, to } = editor.value.state.selection
-    contentToExtract = from !== to ? editor.value.state.doc.textBetween(from, to) : ch.content
-  } else {
-    contentToExtract = ch.content
-  }
-  if (!contentToExtract) { message.warning('内容为空'); return }
-
-  extractLoading.value = true
-  const loadingMsg = message.loading('正在提取元数据，请稍候...', { duration: 0 })
-  try {
-    const result = await aiApi.extractInfo({
-      chapters: [{
-        id: ch.id,
-        title: ch.title || '',
-        content: contentToExtract,
-        order: ch.order,
-      }],
-      existingOutline: n.outline,
-      existingCharacters: n.characters,
-      existingRelations: n.relationships,
-      existingEvents: n.events,
-    })
-    loadingMsg.destroy()
-    showExtractResult.value = true
-    extractResult.value = result
-  } catch (e: unknown) {
-    loadingMsg.destroy()
-    const msg = e instanceof Error ? e.message : String(e)
-    if (msg.includes('JSON') || msg.includes('json') || msg.includes('格式')) {
-      message.error('AI 返回格式异常，请稍后重试或检查内容是否过长')
-    } else {
-      message.error('提取失败: ' + msg)
-    }
-  } finally {
-    extractLoading.value = false
-  }
-}
+// === 导出 ===
+const { handleExport } = useExport(novelStore, message)
 
 // === 外观 ===
 const {
@@ -237,8 +161,6 @@ const { showSavedIndicator, triggerAutoSave, doSave, startPolling, stop: stopAut
   () => settingsStore.settings?.autoSaveMs || 2000,
   doSaveChapter,
 )
-
-// HTML 转换函数已迁移至 utils/editor.ts
 
 // === 切换章节时同步编辑器（初始化时不执行） ===
 const isInitializing = ref(true)
@@ -391,83 +313,6 @@ function handleWindowResize() {
   }, 150)
 }
 
-// === 导出整本小说 ===
-function handleExport() {
-  const novel = novelStore.currentNovel
-  if (!novel || novelStore.chapters.length === 0) {
-    message.warning('没有可导出的内容')
-    return
-  }
-
-  // 按章节序号排序
-  const sorted = [...novelStore.chapters].sort((a, b) => a.order - b.order)
-
-  // 构建纯文本内容
-  const lines: string[] = []
-  lines.push(novel.title)
-  if (novel.author) lines.push(`作者：${novel.author}`)
-  if (novel.description) lines.push(`简介：${novel.description}`)
-  if (novel.outline) lines.push(`大纲：${novel.outline}`)
-  lines.push('')
-  lines.push('━'.repeat(48))
-  lines.push('')
-
-  for (const ch of sorted) {
-    const plain = stripHtml(ch.content)
-
-    lines.push(ch.title || `第${ch.order}章`)
-    lines.push('─'.repeat(24))
-    lines.push('')
-    lines.push(plain)
-    lines.push('')
-    lines.push('')
-  }
-
-  const content = lines.join('\n')
-
-  // 触发浏览器下载
-  const blob = new Blob([content], { type: 'text/plain;charset=utf-8' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `${novel.title}.txt`
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
-  URL.revokeObjectURL(url)
-  message.success('导出完成')
-}
-
-// === AI 弹框状态 ===
-const showContinueWrite = ref(false)
-const showAIEdit = ref(false)
-const showAISetup = ref(false)
-const showNovelInfo = ref(false)
-const showExtractResult = ref(false)
-const extractResult = ref<ExtractionResult | null>(null)
-const extractLoading = ref(false)
-const aiEditMode = ref<'polish' | 'expand'>('polish')
-const pendingEditContent = ref('')
-const refinedContinueResult = ref('')
-const aiConfigured = computed(() => settingsStore.settings?.aiConfigured ?? false)
-
-function openAIEdit(mode: 'polish' | 'expand') {
-  aiEditMode.value = mode
-  pendingEditContent.value = ''
-  showAIEdit.value = true
-}
-
-function handleContinueEdit(mode: 'polish' | 'expand', text: string) {
-  pendingEditContent.value = text
-  aiEditMode.value = mode
-  showAIEdit.value = true
-  refinedContinueResult.value = ''
-}
-
-function handleReplaceExternal(text: string) {
-  refinedContinueResult.value = text
-}
-
 // === 生命周期 ===
 onMounted(async () => {
   if (!settingsStore.settings) await settingsStore.load()
@@ -529,30 +374,16 @@ onUnmounted(() => {
         @update:showSearch="($event) => $event ? searchPanelRef?.openSearch() : searchPanelRef?.closeSearch()"
         @formatContent="formatContent" @save="doSave" />
 
-      <!-- 搜索/替换面板（提取为独立组件） -->
+      <!-- 搜索/替换面板 -->
       <SearchReplacePanel ref="searchPanelRef" :editor="editor" :doSaveChapter="doSaveChapter" />
 
-      <div class="editor-area">
-        <div v-if="currentChapter" class="editor-content" :style="editorStyles">
-          <div class="editor-page">
-            <editor-content :editor="editor" class="content-editable" />
-            <!-- 拆分章节按钮栏 -->
-            <div class="split-bar">
-              <n-button size="tiny" round
-                :type="hasSelection ? 'primary' : 'default'"
-                :disabled="!hasSelection"
-                @click="handleSplitClick"
-                title="将选中内容拆分为新章节">
-                <template #icon><n-icon size="16"><SplitIcon/></n-icon></template>
-                拆分为新章节
-              </n-button>
-            </div>
-          </div>
-        </div>
-        <div v-else class="editor-empty">
-          <n-text depth="3">还没有章节，请创建第一章</n-text>
-        </div>
-      </div>
+      <!-- 编辑器内容区 -->
+      <EditorContentArea
+        :currentChapter="currentChapter"
+        :editor="editor"
+        :editorStyles="editorStyles"
+        :hasSelection="hasSelection"
+        @split="handleSplitClick" />
 
       <EditorStatusBar
         :wordCount="wordCount" :aiConfigured="aiConfigured" :contentChanged="contentChanged"
@@ -576,7 +407,7 @@ onUnmounted(() => {
     <AISetupDialog v-model:show="showAISetup" />
     <NovelInfoDialog v-model:show="showNovelInfo" />
 
-    <!-- 拆分章节弹框（提取为独立组件） -->
+    <!-- 拆分章节弹框 -->
     <SplitChapterDialog
       :show="showSplitDialog"
       :loading="splittingChapter"
@@ -594,90 +425,11 @@ onUnmounted(() => {
   </n-layout>
 </template>
 
-<style scoped>
+<style lang="scss" scoped>
 .main-area {
   flex: 1; min-width: 0; min-height: 0;
   display: flex; flex-direction: column; overflow: hidden;
 }
-
-.editor-area {
-  flex: 1; overflow: hidden; min-height: 0; display: flex;
-}
-
-.editor-content { flex: 1; overflow-y: auto; background: #f0f2f5; }
-
-/* Word 风格的"页面"容器：白底、阴影、四角对齐标记 */
-.editor-page {
-  width: 100%; max-width: 960px; min-height: 100%;
-  margin: 0 auto; background: #fff;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
-  position: relative;
-  display: flex; flex-direction: column;
-}
-
-.content-editable {
-  padding: 48px 64px 64px;
-  outline: none;
-  white-space: pre-wrap; box-sizing: border-box;
-  position: relative;
-  flex: 1;
-  display: flex; flex-direction: column;
-}
-.content-editable:focus,
-.content-editable:focus-visible,
-.content-editable:focus-within {
-  outline: none;
-}
-
-/* ── 四角对齐标记（Word 风格 crop marks）── */
-.editor-page::before {
-  content: ''; position: absolute; pointer-events: none; z-index: 1;
-  top: 28px; left: 44px;
-  width: 20px; height: 20px;
-  border-right: 2px solid #c0c0c0;
-  border-bottom: 2px solid #c0c0c0;
-}
-.editor-page::after {
-  content: ''; position: absolute; pointer-events: none; z-index: 1;
-  top: 28px; right: 44px;
-  width: 20px; height: 20px;
-  border-left: 2px solid #c0c0c0;
-  border-bottom: 2px solid #c0c0c0;
-}
-.content-editable::before {
-  content: ''; position: absolute; pointer-events: none; z-index: 1;
-  bottom: 44px; left: 44px;
-  width: 20px; height: 20px;
-  border-right: 2px solid #c0c0c0;
-  border-top: 2px solid #c0c0c0;
-}
-.content-editable::after {
-  content: ''; position: absolute; pointer-events: none; z-index: 1;
-  bottom: 44px; right: 44px;
-  width: 20px; height: 20px;
-  border-left: 2px solid #c0c0c0;
-  border-top: 2px solid #c0c0c0;
-}
-
-.content-editable :deep(p) {
-  text-indent: 2em;
-  margin-bottom: var(--p-gap, 16px);
-}
-.content-editable :deep(p:last-child) {
-  margin-bottom: 0;
-}
-
-/* 拆分章节按钮栏 */
-.split-bar {
-  flex-shrink: 0;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  padding: 8px 64px 12px;
-  gap: 8px;
-}
-
-.editor-empty { flex: 1; display: flex; align-items: center; justify-content: center; background: #f0f2f5; }
 
 /* 搜索高亮样式（来自 SearchReplacePanel 的 Decoration） */
 :deep(.search-highlight) {
@@ -685,18 +437,10 @@ onUnmounted(() => {
   border-radius: 2px;
   padding: 0 1px;
 }
+
 :deep(.search-current) {
   background-color: #f59e0b;
   border-radius: 2px;
   padding: 0 1px;
-}
-
-.content-editable :deep(.ProseMirror),
-.content-editable :deep(.ProseMirror-focused),
-.content-editable :deep(.ProseMirror:focus) {
-  outline: none !important;
-  border: none !important;
-  box-shadow: none !important;
-  flex: 1;
 }
 </style>

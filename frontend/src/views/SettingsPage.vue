@@ -204,7 +204,7 @@ async function testAIConnection() {
   </div>
 </template>
 
-<style scoped>
+<style lang="scss" scoped>
 .settings-container {
   height: 100%;
   background: #fff;

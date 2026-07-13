@@ -163,7 +163,7 @@ const emit = defineEmits<{
   </div>
 </template>
 
-<style scoped>
+<style lang="scss" scoped>
 .toolbar {
   border-bottom: 1px solid #eee;
   padding: 4px 8px;
@@ -195,8 +195,9 @@ const emit = defineEmits<{
   display: inline-flex; align-items: center; justify-content: center;
   width: 16px; height: 16px;
   font-weight: 400; font-size: 15px; line-height: 1;
+
+  &.italic { font-style: italic; }
 }
-.bi-icon.italic { font-style: italic; }
 
 /* 字号：小 A / 大 A（右上角带 +/-） */
 .a-wrap {
@@ -219,22 +220,25 @@ const emit = defineEmits<{
   line-height: 1;
   color: inherit;
   opacity: 0.8;
+
+  &.plus { top: -3px; }
 }
-.a-sign.plus { top: -3px; }
 
 /* 行距：三条线表示 */
 .line-icon {
   display: flex; flex-direction: column; align-items: center;
   width: 16px; gap: 2px;
+
+  span {
+    display: block; width: 14px; height: 2px; background: currentColor; border-radius: 1px;
+  }
+  .l2 { width: 10px; }
+  &.wide { gap: 3px; }
 }
-.line-icon span {
-  display: block; width: 14px; height: 2px; background: currentColor; border-radius: 1px;
-}
-.line-icon .l2 { width: 10px; }
-.line-icon.wide { gap: 3px; }
 
 /* 段距：¶ 符号间距变化 */
-.para-icon { font-size: 11px; line-height: 1; }
-.para-icon.narrow { letter-spacing: -1px; }
-.para-icon.wide { letter-spacing: 0; }
+.para-icon { font-size: 11px; line-height: 1;
+  &.narrow { letter-spacing: -1px; }
+  &.wide { letter-spacing: 0; }
+}
 </style>

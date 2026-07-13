@@ -320,7 +320,7 @@ onUnmounted(() => {
   </n-modal>
 </template>
 
-<style scoped>
+<style lang="scss" scoped>
 /* 确保卡片的 content 区是 flex 容器，使子元素 flex:1 生效 */
 :deep(.n-card > div:nth-child(2)) {
   flex: 1;
@@ -343,9 +343,12 @@ onUnmounted(() => {
   color: #333;
   cursor: text;
   background: #fff;
-}
-.result-text-display:hover {
-  border-color: #c0c0c0;
+
+  &:hover {
+    border-color: #c0c0c0;
+
+    .result-edit-hint { color: #888; }
+  }
 }
 .result-edit-hint {
   margin-top: 8px;
@@ -354,9 +357,6 @@ onUnmounted(() => {
   text-align: center;
   border-top: 1px dashed #eee;
   padding-top: 6px;
-}
-.result-text-display:hover .result-edit-hint {
-  color: #888;
 }
 /* 结果区 textarea 保留换行显示 */
 :deep(.result-textarea textarea) {

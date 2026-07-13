@@ -190,7 +190,7 @@ const totalWords = computed(() =>
   </n-modal>
 </template>
 
-<style scoped>
+<style lang="scss" scoped>
 /* 弹窗 body 区域 flex-fill 撑满 */
 .novel-info-modal :deep(.n-card__content) {
   display: flex;

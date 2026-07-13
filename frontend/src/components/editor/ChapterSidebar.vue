@@ -260,7 +260,7 @@ onUnmounted(() => {
   </n-layout-sider>
 </template>
 
-<style scoped>
+<style lang="scss" scoped>
 .chapter-sidebar {
   height: 100%; display: flex; flex-direction: column; min-height: 0;
   overflow: hidden; /* 防止伸缩时内容被挤压形变 */

@@ -175,7 +175,7 @@ function handleIgnore() {
   </n-modal>
 </template>
 
-<style scoped>
+<style lang="scss" scoped>
 .extract-preview {
   display: flex; flex-direction: column; gap: 16px;
   max-height: 50vh; overflow-y: auto;

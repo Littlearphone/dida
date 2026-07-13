@@ -123,7 +123,7 @@ function handleEditDesc(e: MouseEvent) {
   </n-card>
 </template>
 
-<style scoped>
+<style lang="scss" scoped>
 .novel-card {
   width: 180px;
   position: relative;

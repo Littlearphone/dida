@@ -132,7 +132,7 @@ onUnmounted(() => { unregisterPlugin(); document.removeEventListener('keydown', 
   </div>
 </template>
 
-<style scoped>
+<style lang="scss" scoped>
 .search-bar {
   background: #fafafa;
   border-bottom: 1px solid #eee;

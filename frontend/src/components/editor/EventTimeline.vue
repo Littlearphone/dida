@@ -151,7 +151,7 @@ const timelineEvents = computed(() =>
   </div>
 </template>
 
-<style scoped>
+<style lang="scss" scoped>
 .timeline-wrapper {
   height: 100%;
   display: flex;
@@ -219,38 +219,44 @@ const timelineEvents = computed(() =>
   z-index: 2;
 }
 
-/* 事件卡片 - 左侧 */
-.timeline-item.left .timeline-tag {
-  left: calc(50% - 16px);
-  transform: translateX(-100%);
-  margin-right: 12px;
-}
-.timeline-item.left .timeline-card {
-  margin-left: calc(50% + 20px);
-  margin-right: 40px;
-}
+/* 事件卡片 - 左侧/右侧 */
+.timeline-item {
+  &.left {
+    .timeline-tag {
+      left: calc(50% - 16px);
+      transform: translateX(-100%);
+      margin-right: 12px;
+    }
+    .timeline-card {
+      margin-left: calc(50% + 20px);
+      margin-right: 40px;
+    }
+  }
 
-/* 事件卡片 - 右侧 */
-.timeline-item.right .timeline-tag {
-  left: calc(50% + 16px);
-  margin-left: 12px;
-}
-.timeline-item.right .timeline-card {
-  margin-right: calc(50% + 20px);
-  margin-left: 40px;
+  &.right {
+    .timeline-tag {
+      left: calc(50% + 16px);
+      margin-left: 12px;
+    }
+    .timeline-card {
+      margin-right: calc(50% + 20px);
+      margin-left: 40px;
+    }
+  }
 }
 
 /* 卡片：覆盖 NaiveUI small 模式的紧凑 padding */
 .timeline-card {
   flex: 1;
   max-width: 45%;
-}
-.timeline-card :deep(.n-card-header) {
+
   /* 只加宽右侧 padding，保留 NaiveUI 默认的上下和左侧 */
-  padding-right: 18px !important;
-}
-.timeline-card :deep(.n-card__content) {
-  padding: 8px 18px 14px !important;
+  :deep(.n-card-header) {
+    padding-right: 18px !important;
+  }
+  :deep(.n-card__content) {
+    padding: 8px 18px 14px !important;
+  }
 }
 
 .card-header {

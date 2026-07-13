@@ -62,7 +62,7 @@ function handleMenuClick(key: string) {
   </n-layout>
 </template>
 
-<style scoped>
+<style lang="scss" scoped>
 .sidebar-item {
   display: flex;
   align-items: center;

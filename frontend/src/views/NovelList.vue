@@ -3,11 +3,6 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useNovelStore } from '../stores/novel'
 import NovelCard from '../components/NovelCard.vue'
-import CreateNovelDialog from '../components/novel/CreateNovelDialog.vue'
-import ImportNovelDialog from '../components/novel/ImportNovelDialog.vue'
-import RenameNovelDialog from '../components/novel/RenameNovelDialog.vue'
-import NovelInfoDialog from '../components/editor/NovelInfoDialog.vue'
-import DeleteNovelConfirmDialog from '../components/novel/DeleteNovelConfirmDialog.vue'
 import { NButton, NIcon, NText, NEmpty, NSpace, NGrid, NGi, NScrollbar } from 'naive-ui'
 import { AddOutline as AddIcon, DocumentTextOutline as ImportIcon } from '@vicons/ionicons5'
 import type { Novel } from '../types'
@@ -91,7 +86,7 @@ onMounted(() => { novelStore.loadNovels() })
   </div>
 </template>
 
-<style scoped>
+<style lang="scss" scoped>
 .novel-list-container {
   height: 100%;
   display: flex;
