@@ -12,10 +12,10 @@ import {
   AddOutline as AddIcon, GitMergeOutline as MergeIcon,
   RefreshOutline as ReloadIcon, TrashOutline as DeleteIcon,
 } from '@vicons/ionicons5'
-import type { Character, NovelRelationship } from '../../types'
-import { useNovelStore } from '../../stores/novel'
-import { useCharacterEdit } from '../../composables/useCharacterEdit'
-import { useGraphNetwork } from '../../composables/useGraphNetwork'
+import type { Character, NovelRelationship } from '@/types'
+import { useNovelStore } from '@/stores/novel.ts'
+import { useCharacterEdit } from '@/composables/useCharacterEdit.ts'
+import { useGraphNetwork } from '@/composables/useGraphNetwork.ts'
 
 const props = defineProps<{
   characters: Character[]
@@ -54,7 +54,7 @@ const {
   editRelationships, otherCharNames,
   openAdd, openEdit,
   addRelationship, removeRelationship,
-  saveCharacter, removeCharacter,
+  saveCharacter,
 } = useCharacterEdit(
   chars, rels, emit, message, autoSave,
 )
@@ -245,8 +245,8 @@ function applyCircleLayout() {
 
 // === 图谱 ===
 const {
+  graphReady,
   getGraph,
-  getNodeAtPoint,
   setOnNodeClick,
   setOnEdgeConnected,
   setOnAfterBuild,
@@ -306,7 +306,7 @@ setOnContainerResize(() => { nextTick(applyCircleLayout) })
         </n-button>
         <n-button class="toolbar-btn" size="small" secondary
           @click="applyCircleLayout"
-          :disabled="!getGraph()">
+          :disabled="!graphReady">
           <template #icon><n-icon><ReloadIcon/></n-icon></template>重新布局
         </n-button>
       </div>

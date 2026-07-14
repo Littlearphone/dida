@@ -3,7 +3,7 @@
  * 管理：Graph 构建、重建、ResizeObserver、重新布局
  * 连线使用 X6 内置拖拽机制，无需手动 mousedown 处理
  */
-import {nextTick, onMounted, onUnmounted, watch} from 'vue'
+import {nextTick, onMounted, onUnmounted, ref, watch} from 'vue'
 import {Graph, Shape} from '@antv/x6'
 import type {X6NodeMeta} from '../utils/graphUtils'
 import {buildEdges, buildNodes} from '../utils/graphUtils'
@@ -19,6 +19,8 @@ export function useGraphNetwork(
   let resizeObserver: ResizeObserver | null = null
   let rebuildTimer: ReturnType<typeof setTimeout> | null = null
   let resizeRelayoutTimer: ReturnType<typeof setTimeout> | null = null
+  /** 响应式标志：Graph 是否已构建完成（使模板可响应式判断） */
+  const graphReady = ref(false)
 
   function buildGraph() {
     if (!containerRef.value) return
@@ -94,6 +96,9 @@ export function useGraphNetwork(
       if (meta && meta.index !== undefined) onNodeClick(meta.index)
     })
 
+    // 标记构建完成（响应式，使模板可感知）
+    graphReady.value = true
+
     // 首次适应内容
     nextTick(() => {
       graph?.zoomToFit({ maxScale: 1, padding: 40 })
@@ -139,6 +144,7 @@ export function useGraphNetwork(
 
   function scheduleRebuild() {
     graphBuilt = false
+    graphReady.value = false  // 重建期间禁用按钮
     if (rebuildTimer) clearTimeout(rebuildTimer)
     rebuildTimer = setTimeout(() => {
       if (containerRef.value) ensureGraphBuilt()
@@ -202,6 +208,7 @@ export function useGraphNetwork(
   })
 
   return {
+    graphReady,
     getGraph,
     getNodeAtPoint,
     setOnNodeClick,
