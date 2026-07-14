@@ -19,6 +19,8 @@ html, body, #app {
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
   font-weight: 400;
+  /* 禁用触摸/手势缩放（桌面端 Ctrl+滚轮由 JS 阻止） */
+  touch-action: pan-x pan-y;
 }
 
 /* 所有弹框（dialog-modal）统一样式 */

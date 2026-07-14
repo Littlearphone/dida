@@ -223,6 +223,10 @@ const totalWords = computed(() =>
   min-height: 0;
   position: relative;
 }
+/* animated 模式下内部 pane-wrapper 缺高度，导致 flex 断链 */
+.info-tabs :deep(.n-tabs-pane-wrapper) {
+  height: 100%;
+}
 .info-tabs :deep(.n-tab-pane) {
   height: 100%;
   display: flex;

@@ -1,16 +1,16 @@
 <script setup lang="ts">
 /**
- * 角色关系图谱 — 角色编辑 + vis-network 可视化 + 连线建关系
+ * 角色关系图谱 — 角色编辑 + AntV X6 可视化 + 连线建关系
+ * 拖拽连线使用 X6 内置机制（connecting.allowNode），连线为曲线
  */
-import { ref, computed, nextTick, onUnmounted } from 'vue'
+import { ref, computed, nextTick } from 'vue'
 import {
   NButton, NIcon, NModal, NForm, NFormItem, NInput, NSelect,
   NSpace, useMessage, NEmpty, NText,
 } from 'naive-ui'
 import {
   AddOutline as AddIcon, GitMergeOutline as MergeIcon,
-  RefreshOutline as ReloadIcon, LinkOutline as LinkIcon,
-  TrashOutline as DeleteIcon,
+  RefreshOutline as ReloadIcon, TrashOutline as DeleteIcon,
 } from '@vicons/ionicons5'
 import type { Character, NovelRelationship } from '../../types'
 import { useNovelStore } from '../../stores/novel'
@@ -59,133 +59,26 @@ const {
   chars, rels, emit, message, autoSave,
 )
 
-// === 连线模式 ===
-const connectMode = ref(false)
+// === 连线（X6 内置拖拽 → edge:connected → 弹框确认） ===
 const connectSrcIdx = ref(-1)
 const connectTgtIdx = ref(-1)
+const connectEditIdx = ref(-1) // 修改已有关系时的索引，-1 表示新建
 const showConnectDialog = ref(false)
 const connectType = ref('')
 const connectDesc = ref('')
-const dragActive = ref(false)
-const dragSourceIdx = ref(-1)
-const dragLine = ref({ x1: 0, y1: 0, x2: 0, y2: 0 })
 
-function enterConnectMode() {
-  connectMode.value = true
-  resetConnectState()
-  getNetwork()?.setOptions({ interaction: { dragNodes: false } })
-  setCanvasPointerEvents('none')
-  const el = containerRef.value
-  if (el) el.addEventListener('mousedown', onDragMouseDown)
-  message.info('连线模式：从节点拖拽连线到目标节点')
-}
-
-function exitConnectMode() {
-  connectMode.value = false
-  resetConnectState()
-  removeDragListeners()
-  getNetwork()?.setOptions({ interaction: { dragNodes: true } })
-}
+/** 弹框标题：新建或修改 */
+const connectDialogTitle = computed(() =>
+  connectEditIdx.value >= 0 ? '修改关系' : '添加关系',
+)
 
 function resetConnectState() {
   showConnectDialog.value = false
   connectSrcIdx.value = -1
   connectTgtIdx.value = -1
+  connectEditIdx.value = -1
   connectType.value = ''
   connectDesc.value = ''
-  dragActive.value = false
-  dragSourceIdx.value = -1
-}
-
-function cancelConnect() {
-  exitConnectMode()
-}
-
-function setCanvasPointerEvents(val: 'auto' | 'none') {
-  if (!containerRef.value) return
-  const canvases = containerRef.value.querySelectorAll('canvas')
-  canvases.forEach(c => c.style.pointerEvents = val)
-}
-
-function removeDragListeners() {
-  setCanvasPointerEvents('auto')
-  const el = containerRef.value
-  if (el) el.removeEventListener('mousedown', onDragMouseDown)
-  document.removeEventListener('mousemove', onDragMouseMove)
-  document.removeEventListener('mouseup', onDragMouseUp)
-}
-
-function toggleConnectMode() {
-  if (connectMode.value) {
-    getNetwork()?.setOptions({ interaction: { dragNodes: true } })
-    cancelConnect()
-  } else {
-    enterConnectMode()
-  }
-}
-
-/** 点击连线按钮：若网络未就绪则强制构建后再进入连线模式 */
-function handleConnectClick() {
-  if (!getNetwork()) {
-    ensureGraphBuilt()
-    return
-  }
-  toggleConnectMode()
-}
-
-function onDragMouseDown(e: MouseEvent) {
-  const net = getNetwork()
-  if (!net) return
-  const el = containerRef.value
-  if (!el) return
-  const rect = el.getBoundingClientRect()
-  const x = e.clientX - rect.left
-  const y = e.clientY - rect.top
-  const idx = net.getNodeAt({ x, y }) as number | undefined
-  if (idx === undefined) return
-
-  e.preventDefault()
-  dragSourceIdx.value = idx
-  dragActive.value = true
-
-  const canvasPos = net.getPosition(idx)
-  const domPos = net.canvasToDOM(canvasPos)
-  dragLine.value = { x1: domPos.x, y1: domPos.y, x2: x, y2: y }
-
-  document.addEventListener('mousemove', onDragMouseMove)
-  document.addEventListener('mouseup', onDragMouseUp)
-}
-
-function onDragMouseMove(e: MouseEvent) {
-  if (!dragActive.value) return
-  e.preventDefault()
-  const el = containerRef.value
-  if (el) {
-    const rect = el.getBoundingClientRect()
-    dragLine.value.x2 = e.clientX - rect.left
-    dragLine.value.y2 = e.clientY - rect.top
-  }
-}
-
-function onDragMouseUp(e: MouseEvent) {
-  document.removeEventListener('mousemove', onDragMouseMove)
-  document.removeEventListener('mouseup', onDragMouseUp)
-  if (!dragActive.value) return
-  dragActive.value = false
-
-  const el = containerRef.value
-  if (el) {
-    const rect = el.getBoundingClientRect()
-    const x = e.clientX - rect.left
-    const y = e.clientY - rect.top
-    const targetIdx = getNetwork()?.getNodeAt({ x, y }) as number | undefined
-    if (targetIdx !== undefined && targetIdx !== dragSourceIdx.value) {
-      connectSrcIdx.value = dragSourceIdx.value
-      connectTgtIdx.value = targetIdx
-      showConnectDialog.value = true
-    }
-  }
-  dragSourceIdx.value = -1
 }
 
 function confirmConnect() {
@@ -195,16 +88,26 @@ function confirmConnect() {
   }
   const srcName = props.characters[connectSrcIdx.value].name
   const tgtName = props.characters[connectTgtIdx.value].name
-  const newRel: NovelRelationship = {
+  const rel: NovelRelationship = {
     source: srcName,
     target: tgtName,
     relationType: connectType.value.trim(),
     description: connectDesc.value.trim() || undefined,
   }
-  const newRels = [...(props.relationships || []), newRel]
+
+  let newRels: NovelRelationship[]
+  if (connectEditIdx.value >= 0) {
+    // 修改已有关系
+    newRels = [...(props.relationships || [])]
+    newRels[connectEditIdx.value] = rel
+    message.success(`已修改「${srcName}」→「${tgtName}」`)
+  } else {
+    // 新建关系
+    newRels = [...(props.relationships || []), rel]
+    message.success(`已添加「${srcName}」→「${tgtName}」`)
+  }
   emit('update:relationships', newRels)
   autoSave(props.characters, newRels)
-  message.success(`已添加「${srcName}」→「${tgtName}」`)
   resetConnectState()
 }
 
@@ -310,10 +213,10 @@ function confirmMerge() {
 }
 
 // === 环状布局 ===
-/** 应用环状排列 + 折线连接 */
+/** 应用环状排列（手动计算位置，无物理引擎） */
 function applyCircleLayout() {
-  const net = getNetwork()
-  if (!net) return
+  const graph = getGraph()
+  if (!graph) return
   const el = containerRef.value
   if (!el) return
   const rect = el.getBoundingClientRect()
@@ -322,35 +225,70 @@ function applyCircleLayout() {
   const cx = rect.width / 2
   const cy = rect.height / 2
   const radius = Math.min(cx, cy) - 80
-  const positions = props.characters.map((_, i) => {
+  // 容器尺寸未稳定时跳过，等待下一次 resize 回调
+  if (radius < 100) return
+  props.characters.forEach((_, i) => {
     const angle = (2 * Math.PI * i) / count - Math.PI / 2
-    return { x: cx + radius * Math.cos(angle), y: cy + radius * Math.sin(angle) }
+    const node = graph.getCellById(`char-${i}`)
+    if (node && node.isNode()) {
+      node.setPosition({ x: cx + radius * Math.cos(angle), y: cy + radius * Math.sin(angle) })
+    }
   })
-  // 逐个设置节点位置，关闭物理引擎，切换为直角折线
-  positions.forEach((p, i) => net.moveNode(i, p.x, p.y))
-  net.setOptions({ physics: { enabled: false }, edges: { smooth: { type: 'discrete', roundness: 0 } } })
-  net.fit({ animation: true, padding: 40 })
+  graph.zoomToFit({ maxScale: 1, padding: 40 })
+  graph.centerContent()
+  // 将 fit 后的缩放设为最小缩放，防止缩过头（保留 5% 余量）
+  const zoom = graph.zoom()
+  if (zoom > 0) {
+    ;(graph as any).options.scaling.min = zoom * 0.95
+  }
 }
 
 // === 图谱 ===
 const {
-  svgViewBox,
-  getNetwork,
+  getGraph,
+  getNodeAtPoint,
   setOnNodeClick,
+  setOnEdgeConnected,
   setOnAfterBuild,
-  ensureGraphBuilt,
-  reLayout,
-} = useGraphNetwork(containerRef, chars, rels, connectMode, cancelConnect, enterConnectMode)
+  setOnContainerResize,
+} = useGraphNetwork(containerRef, chars, rels)
 
 // 注册节点点击回调（打开编辑弹框）
 setOnNodeClick((idx: number) => openEdit(idx))
 
+// 接管 X6 内置拖拽连线结果：移除自动边 → 弹出关系编辑框
+setOnEdgeConnected((edge: any) => {
+  // 先读取元数据，再移除边（remove 后 getSourceCell 返回 null）
+  const srcMeta = edge.getSourceCell()?.getData()
+  const tgtMeta = edge.getTargetCell()?.getData()
+  edge.remove()
+  if (srcMeta === undefined || tgtMeta === undefined) return
+  connectSrcIdx.value = srcMeta.index
+  connectTgtIdx.value = tgtMeta.index
+
+  // 检查是否有已存在的关系，有则进入修改模式
+  const existingIdx = (props.relationships || []).findIndex(r =>
+    (r.source === srcMeta.name && r.target === tgtMeta.name) ||
+    (r.source === tgtMeta.name && r.target === srcMeta.name),
+  )
+  if (existingIdx >= 0) {
+    connectEditIdx.value = existingIdx
+    connectType.value = props.relationships![existingIdx].relationType
+    connectDesc.value = props.relationships![existingIdx].description || ''
+  } else {
+    connectEditIdx.value = -1
+    connectType.value = ''
+    connectDesc.value = ''
+  }
+
+  showConnectDialog.value = true
+})
+
 // 图重建后自动恢复环状布局
 setOnAfterBuild(() => { nextTick(applyCircleLayout) })
 
-onUnmounted(() => {
-  removeDragListeners()
-})
+// 容器尺寸变化（如 Tab 切换动画）后重新布局
+setOnContainerResize(() => { nextTick(applyCircleLayout) })
 </script>
 
 <template>
@@ -362,19 +300,13 @@ onUnmounted(() => {
           <template #icon><n-icon><AddIcon/></n-icon></template>添加角色
         </n-button>
         <n-button class="toolbar-btn" size="small" secondary
-          :class="{ active: connectMode }"
-          @click="handleConnectClick"
-          :disabled="characters.length === 0">
-          <template #icon><n-icon><LinkIcon/></n-icon></template>{{ connectMode ? '退出连线' : '连线' }}
-        </n-button>
-        <n-button class="toolbar-btn" size="small" secondary
           @click="openMergeDialog"
           :disabled="characters.length < 2">
           <template #icon><n-icon><MergeIcon/></n-icon></template>合并
         </n-button>
         <n-button class="toolbar-btn" size="small" secondary
           @click="applyCircleLayout"
-          :disabled="!getNetwork()">
+          :disabled="!getGraph()">
           <template #icon><n-icon><ReloadIcon/></n-icon></template>重新布局
         </n-button>
       </div>
@@ -385,31 +317,12 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <!-- 连线模式横幅 -->
-    <div v-if="connectMode" class="connect-banner">
-      <span>🔗 连线模式 — 从节点拖拽到目标角色建立关系</span>
-      <n-button size="tiny" text style="color: #fff; text-decoration: underline;" @click="cancelConnect">退出连线</n-button>
-    </div>
-
-    <!-- vis-network 画布 + SVG 拖拽叠加层 -->
+    <!-- X6 画布（自带拖拽连线预览） -->
     <div v-if="characters.length > 0" class="graph-area">
-      <div ref="containerRef" class="graph-container" :class="{ 'connect-mode': connectMode }" />
-      <svg class="graph-svg-overlay" :viewBox="svgViewBox">
-        <defs>
-          <marker id="drag-arrow" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
-            <polygon points="0 0, 10 3.5, 0 7" fill="#2080f0" />
-          </marker>
-        </defs>
-        <line v-if="dragActive"
-          :x1="dragLine.x1" :y1="dragLine.y1"
-          :x2="dragLine.x2" :y2="dragLine.y2"
-          stroke="#2080f0" stroke-width="2.5"
-          stroke-dasharray="6, 4" stroke-linecap="round"
-          marker-end="url(#drag-arrow)" />
-      </svg>
+      <div ref="containerRef" class="graph-container" />
     </div>
     <div v-if="characters.length > 0 && !hasRelationships" class="graph-hint">
-      角色已就绪，点击「连线」按钮拖拽建立关系
+      从节点拖拽到目标角色即可建立关系
     </div>
     <n-empty v-if="characters.length === 0" description="还没有角色" class="graph-empty">
       <template #extra>
@@ -467,7 +380,7 @@ onUnmounted(() => {
     </n-modal>
 
     <!-- 连线模式弹框 -->
-    <n-modal :show="showConnectDialog" title="添加关系" preset="card"
+    <n-modal :show="showConnectDialog" :title="connectDialogTitle" preset="card"
       style="width: 360px;" :mask-closable="false"
       @update:show="showConnectDialog = $event">
       <n-form label-placement="top">
@@ -480,7 +393,7 @@ onUnmounted(() => {
       </n-form>
       <template #footer>
         <n-space justify="end">
-          <n-button quaternary @click="cancelConnect">取消</n-button>
+          <n-button quaternary @click="resetConnectState">取消</n-button>
           <n-button type="primary" @click="confirmConnect">确定</n-button>
         </n-space>
       </template>
@@ -549,21 +462,7 @@ onUnmounted(() => {
 
 .toolbar-info { flex-shrink: 0; }
 
-/* 连线模式横幅 */
-.connect-banner {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 6px 14px;
-  margin-bottom: 10px;
-  background: #2080f0;
-  color: #fff;
-  border-radius: 6px;
-  font-size: 13px;
-}
-
-/* vis-network 画布容器 */
+/* X6 画布容器 */
 .graph-area {
   flex: 1;
   min-height: 0;
@@ -573,25 +472,14 @@ onUnmounted(() => {
 }
 .graph-container {
   flex: 1;
-  min-height: 0;
+  min-height: 150px;
   position: relative;
   border: 1px solid #eee;
   border-radius: 6px;
   background: #fafafa;
   overflow: hidden;
-
-  &.connect-mode { cursor: crosshair; }
 }
 
-/* SVG 拖拽线叠加层 */
-.graph-svg-overlay {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-  z-index: 10;
-}
 /* 无关系提示 */
 .graph-hint {
   flex-shrink: 0;
@@ -627,5 +515,32 @@ onUnmounted(() => {
 /* 弹框内容溢出滚动 */
 .dialog-modal :deep(.n-card__content) {
   overflow-y: auto;
+}
+</style>
+
+<!-- 非 scoped：X6 端口 + 连线拖拽小圆点（SVG 内，不受 scoped 限制） -->
+<style lang="scss">
+/* 端口小圆点：hover 节点时显示，可拖拽连线 */
+.x6-node {
+  .x6-port-body {
+    cursor: crosshair;
+    width: 10px !important;
+    height: 10px !important;
+    margin-left: -5px !important;
+    margin-top: -5px !important;
+    border-radius: 50%;
+    background: #2080f0;
+    border: 2px solid #fff;
+    box-shadow: 0 1px 3px rgba(0,0,0,.25);
+    transition: opacity .15s, transform .15s, box-shadow .15s;
+    opacity: 0;                       /* 默认隐藏，hover 节点时显示 */
+  }
+  &:hover .x6-port-body {
+    opacity: 1;
+  }
+  .x6-port-body:hover {
+    transform: scale(1.4);
+    box-shadow: 0 2px 8px rgba(32,128,240,.5);
+  }
 }
 </style>
