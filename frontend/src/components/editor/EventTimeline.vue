@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref } from 'vue'
 import {
-  NButton, NIcon, NCard, NTag, NModal, NForm, NFormItem,
-  NInput, NSpace, useMessage, NEmpty,
+  NButton, NIcon, NModal, NForm, NFormItem,
+  NInput, NSpace, NTimeline, NTimelineItem,
+  NScrollbar, useMessage, NEmpty, NText,
 } from 'naive-ui'
 import { AddOutline as AddIcon, CreateOutline as EditIcon, TrashOutline as DeleteIcon } from '@vicons/ionicons5'
 import type { Event } from '../../types'
@@ -18,13 +19,11 @@ const message = useMessage()
 const showEdit = ref(false)
 const editingIndex = ref(-1)
 const editName = ref('')
-const editTime = ref('')
 const editDesc = ref('')
 
 function openAdd() {
   editingIndex.value = -1
   editName.value = ''
-  editTime.value = ''
   editDesc.value = ''
   showEdit.value = true
 }
@@ -33,7 +32,6 @@ function openEdit(index: number) {
   const e = props.events[index]
   editingIndex.value = index
   editName.value = e.name
-  editTime.value = e.timeOrder || ''
   editDesc.value = e.description || ''
   showEdit.value = true
 }
@@ -46,7 +44,6 @@ function saveEvent() {
   const list = [...props.events]
   const evt: Event = {
     name: editName.value.trim(),
-    timeOrder: editTime.value.trim() || undefined,
     description: editDesc.value.trim() || undefined,
   }
   if (editingIndex.value >= 0) {
@@ -63,11 +60,6 @@ function removeEvent(index: number) {
   list.splice(index, 1)
   emit('update:events', list)
 }
-
-// 左右交替
-const timelineEvents = computed(() =>
-  props.events.map((e, i) => ({ ...e, _index: i, _side: i % 2 === 0 ? 'left' : 'right' as const })),
-)
 </script>
 
 <template>
@@ -81,43 +73,36 @@ const timelineEvents = computed(() =>
     </div>
 
     <!-- 时间线内容 -->
-    <div v-if="events.length > 0" class="timeline-container">
-      <div class="timeline-line" />
-      <div
-        v-for="evt in timelineEvents"
-        :key="evt._index"
-        class="timeline-item"
-        :class="evt._side"
-      >
-        <!-- 中间圆点 -->
-        <div class="timeline-dot" />
-        <!-- 时间标签 -->
-        <div v-if="evt.timeOrder" class="timeline-tag">
-          <n-tag size="small" :bordered="false">
-            {{ evt.timeOrder }}
-          </n-tag>
-        </div>
-        <!-- 内容卡片 -->
-        <n-card class="timeline-card" size="small" hoverable>
-          <template #header>
-            <div class="card-header">
-              <n-text strong>{{ evt.name }}</n-text>
-              <div class="card-actions">
-                <n-button text size="tiny" @click="openEdit(evt._index)">
-                  <template #icon><n-icon size="14"><EditIcon/></n-icon></template>
-                </n-button>
-                <n-button text size="tiny" style="color: #d03050;" @click="removeEvent(evt._index)">
-                  <template #icon><n-icon size="14"><DeleteIcon/></n-icon></template>
-                </n-button>
+    <n-scrollbar v-if="events.length > 0" class="timeline-scroll">
+      <div class="timeline-inner">
+        <n-timeline item-placement="left" :icon-size="28">
+          <n-timeline-item
+            v-for="(evt, i) in events"
+            :key="i"
+          >
+            <template #icon>
+              <span class="timeline-num">{{ i + 1 }}</span>
+            </template>
+            <template #header>
+              <div class="item-header">
+                <n-text strong>{{ evt.name }}</n-text>
+                <div class="item-actions">
+                  <n-button text size="small" @click="openEdit(i)">
+                    <template #icon><n-icon size="16"><EditIcon/></n-icon></template>
+                  </n-button>
+                  <n-button text size="small" style="color: #d03050;" @click="removeEvent(i)">
+                    <template #icon><n-icon size="16"><DeleteIcon/></n-icon></template>
+                  </n-button>
+                </div>
               </div>
-            </div>
-          </template>
-          <n-text v-if="evt.description" depth="3" style="font-size: 13px; line-height: 1.6; white-space: pre-wrap;">
-            {{ evt.description }}
-          </n-text>
-        </n-card>
+            </template>
+            <n-text v-if="evt.description" depth="3" style="font-size: 13px; line-height: 1.6; white-space: pre-wrap;">
+              {{ evt.description }}
+            </n-text>
+          </n-timeline-item>
+        </n-timeline>
       </div>
-    </div>
+    </n-scrollbar>
 
     <!-- 空状态 -->
     <n-empty v-else description="还没有事件" class="timeline-empty">
@@ -133,9 +118,6 @@ const timelineEvents = computed(() =>
       <n-form label-placement="top">
         <n-form-item label="事件名称" required>
           <n-input v-model:value="editName" placeholder="输入事件名称" />
-        </n-form-item>
-        <n-form-item label="时间顺序">
-          <n-input v-model:value="editTime" placeholder="例：第1章 / 序章 / 三年前..." />
         </n-form-item>
         <n-form-item label="描述">
           <n-input v-model:value="editDesc" type="textarea" :rows="3" placeholder="事件描述" />
@@ -167,110 +149,48 @@ const timelineEvents = computed(() =>
   margin-bottom: 16px;
 }
 
-.timeline-container {
+.timeline-scroll {
   flex: 1;
   min-height: 0;
-  overflow-y: auto;
-  position: relative;
-  padding: 8px 0;
+}
+.timeline-inner {
+  padding-top: 10px;
 }
 
-/* 中央竖线 */
-.timeline-line {
-  position: absolute;
-  left: 50%;
-  top: 0;
-  bottom: 0;
-  width: 2px;
-  background: linear-gradient(to bottom, #e0e0e0, #c0c0c0, #e0e0e0);
-  transform: translateX(-50%);
-}
-
-/* 每个事件占一行，左右交替 */
-.timeline-item {
-  display: flex;
-  align-items: flex-start;
-  position: relative;
-  margin-bottom: 24px;
-  min-height: 60px;
-}
-
-/* 中间圆点 */
-.timeline-dot {
-  position: absolute;
-  left: 50%;
-  top: 8px;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: #2080f0;
-  border: 3px solid #fff;
-  box-shadow: 0 0 0 2px #2080f0;
-  transform: translateX(-50%);
-  z-index: 1;
-}
-
-/* 时间标签 */
-.timeline-tag {
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
-  margin-top: -4px;
-  z-index: 2;
-}
-
-/* 事件卡片 - 左侧/右侧 */
-.timeline-item {
-  &.left {
-    .timeline-tag {
-      left: calc(50% - 16px);
-      transform: translateX(-100%);
-      margin-right: 12px;
-    }
-    .timeline-card {
-      margin-left: calc(50% + 20px);
-      margin-right: 40px;
-    }
-  }
-
-  &.right {
-    .timeline-tag {
-      left: calc(50% + 16px);
-      margin-left: 12px;
-    }
-    .timeline-card {
-      margin-right: calc(50% + 20px);
-      margin-left: 40px;
-    }
-  }
-}
-
-/* 卡片：覆盖 NaiveUI small 模式的紧凑 padding */
-.timeline-card {
-  flex: 1;
-  max-width: 45%;
-
-  /* 只加宽右侧 padding，保留 NaiveUI 默认的上下和左侧 */
-  :deep(.n-card-header) {
-    padding-right: 18px !important;
-  }
-  :deep(.n-card__content) {
-    padding: 8px 18px 14px !important;
-  }
-}
-
-.card-header {
+/* 事件标题行：名称后紧跟操作按钮 */
+.item-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
   width: 100%;
 }
-.card-actions {
+.item-actions {
   display: flex;
-  gap: 8px;
+  gap: 6px;
   flex-shrink: 0;
-  padding-left: 8px;
+  margin-left: 8px;
+
+  /* 编辑图标：hover 时笔杆轻旋 */
+  :deep(.n-button:first-child:hover .n-icon) {
+    animation: icon-wiggle 0.3s ease-in-out;
+  }
+
+  /* 删除图标：hover 时垃圾桶盖子开合 */
+  :deep(.n-button:last-child:hover .n-icon) {
+    animation: trash-lid 0.35s ease-in-out;
+  }
+}
+
+@keyframes icon-wiggle {
+  0%, 100% { transform: rotate(0deg); }
+  25% { transform: rotate(-8deg); }
+  75% { transform: rotate(8deg); }
+}
+
+@keyframes trash-lid {
+  0% { transform: perspective(60px) rotateX(0deg); transform-origin: 50% 0%; }
+  35% { transform: perspective(60px) rotateX(-40deg); transform-origin: 50% 0%; }
+  60% { transform: perspective(60px) rotateX(-25deg); transform-origin: 50% 0%; }
+  100% { transform: perspective(60px) rotateX(0deg); transform-origin: 50% 0%; }
 }
 
 .timeline-empty {
@@ -278,5 +198,21 @@ const timelineEvents = computed(() =>
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+/* 序号圆点，替换 NTimelineItem 默认的 dot */
+/* 容器由 NaiveUI 控制宽高（--n-icon-size: 28px），flex 居中 */
+.timeline-num {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background: #2080f0;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
 }
 </style>

@@ -35,7 +35,6 @@ export interface NovelRelationship {
 export interface Event {
   name: string
   description?: string
-  timeOrder?: string
   chapterId?: string
 }
 
@@ -104,7 +103,6 @@ export interface ExtractionResult {
 export interface ExtractedEvent {
   name: string
   description: string
-  timeOrder: string
   relatedChars: string[]
 }
 

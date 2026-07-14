@@ -57,7 +57,7 @@ function mergeEvents(existing: Event[], incoming: ExtractionResult['events']): E
   const merged = [...existing]
   for (const e of incoming) {
     if (!set.has(e.name)) {
-      merged.push({ name: e.name, description: e.description, timeOrder: e.timeOrder })
+      merged.push({ name: e.name, description: e.description })
       set.add(e.name)
     }
   }
