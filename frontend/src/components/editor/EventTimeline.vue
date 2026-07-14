@@ -3,10 +3,10 @@ import { ref } from 'vue'
 import {
   NButton, NIcon, NModal, NForm, NFormItem,
   NInput, NSpace, NTimeline, NTimelineItem,
-  NScrollbar, useMessage, NEmpty, NText,
+  NScrollbar, useMessage, useDialog, NEmpty, NText,
 } from 'naive-ui'
-import { AddOutline as AddIcon, CreateOutline as EditIcon, TrashOutline as DeleteIcon } from '@vicons/ionicons5'
-import type { Event } from '../../types'
+import { AddOutline as AddIcon, CreateOutline as EditIcon, CloseOutline as CloseIcon } from '@vicons/ionicons5'
+import type { Event } from '@/types'
 
 const props = defineProps<{ events: Event[] }>()
 const emit = defineEmits<{
@@ -14,6 +14,7 @@ const emit = defineEmits<{
 }>()
 
 const message = useMessage()
+const dialog = useDialog()
 
 // ------ 编辑弹框状态 ------
 const showEdit = ref(false)
@@ -56,9 +57,19 @@ function saveEvent() {
 }
 
 function removeEvent(index: number) {
-  const list = [...props.events]
-  list.splice(index, 1)
-  emit('update:events', list)
+  const name = props.events[index].name
+  dialog.warning({
+    title: '删除事件',
+    content: `确定删除「${name}」吗？`,
+    positiveText: '删除',
+    negativeText: '取消',
+    draggable: false,
+    onPositiveClick: () => {
+      const list = [...props.events]
+      list.splice(index, 1)
+      emit('update:events', list)
+    },
+  })
 }
 </script>
 
@@ -91,7 +102,22 @@ function removeEvent(index: number) {
                     <template #icon><n-icon size="16"><EditIcon/></n-icon></template>
                   </n-button>
                   <n-button text size="small" style="color: #d03050;" @click="removeEvent(i)">
-                    <template #icon><n-icon size="16"><DeleteIcon/></n-icon></template>
+                    <template #icon>
+                      <svg class="trash-icon" viewBox="0 0 512 512" width="16" height="16"
+                        fill="none" stroke="currentColor" stroke-width="32"
+                        stroke-linecap="round" stroke-linejoin="round">
+                        <!-- 盖子 + 提手（向上翻开） -->
+                        <g class="trash-top">
+                          <path d="M80 112h352" />
+                          <path d="M192 112V72a23.93 23.93 0 0 1 24-24h80a23.93 23.93 0 0 1 24 24v40" />
+                        </g>
+                        <!-- 桶身 -->
+                        <path d="M112 112l20 320c.95 18.49 14.4 32 32 32h184c17.67 0 30.87-13.51 32-32l20-320" />
+                        <path d="M256 176v224" />
+                        <path d="M184 176l8 224" />
+                        <path d="M328 176l-8 224" />
+                      </svg>
+                    </template>
                   </n-button>
                 </div>
               </div>
@@ -112,7 +138,7 @@ function removeEvent(index: number) {
     </n-empty>
 
     <!-- 编辑弹框 -->
-    <n-modal class="dialog-modal" :show="showEdit" title="编辑事件" preset="card"
+    <n-modal class="dialog-modal" :show="showEdit" :title="editingIndex >= 0 ? '编辑事件' : '添加事件'" preset="card"
       style="width: 480px;" :mask-closable="false" draggable
       @update:show="showEdit = $event">
       <n-form label-placement="top">
@@ -174,9 +200,12 @@ function removeEvent(index: number) {
     animation: icon-wiggle 0.3s ease-in-out;
   }
 
-  /* 删除图标：hover 时垃圾桶盖子开合 */
-  :deep(.n-button:last-child:hover .n-icon) {
+  /* 删除图标：hover 时盖子翻开 + 桶身下沉 */
+  :deep(.n-button:last-child:hover .trash-top) {
     animation: trash-lid 0.35s ease-in-out;
+  }
+  :deep(.n-button:last-child:hover .trash-icon) {
+    animation: trash-drop 0.35s ease-in-out;
   }
 }
 
@@ -187,10 +216,21 @@ function removeEvent(index: number) {
 }
 
 @keyframes trash-lid {
-  0% { transform: perspective(60px) rotateX(0deg); transform-origin: 50% 0%; }
-  35% { transform: perspective(60px) rotateX(-40deg); transform-origin: 50% 0%; }
-  60% { transform: perspective(60px) rotateX(-25deg); transform-origin: 50% 0%; }
-  100% { transform: perspective(60px) rotateX(0deg); transform-origin: 50% 0%; }
+  0%, 100% { transform: rotate(0deg); }
+  35% { transform: rotate(35deg); }
+  65% { transform: rotate(20deg); }
+}
+
+@keyframes trash-drop {
+  0%, 100% { transform: translateY(0); }
+  35% { transform: translateY(3px); }
+  65% { transform: translateY(1.5px); }
+}
+
+/* 盖子组：以右侧铰链（432, 112）为旋转原点 */
+.trash-icon .trash-top {
+  transform-box: view-box;
+  transform-origin: 432px 112px;
 }
 
 .timeline-empty {
