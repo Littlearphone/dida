@@ -2,7 +2,7 @@
 /**
  * 搜索/替换面板 — UI 层，核心逻辑由 useSearch 管理
  */
-import { onMounted, onUnmounted } from 'vue'
+import { onMounted, onUnmounted, toRef } from 'vue'
 import { useSearch } from '../../composables/useSearch'
 import { NButton, NIcon, NInput, NText } from 'naive-ui'
 import {
@@ -17,7 +17,7 @@ const props = defineProps<{
 }>()
 
 // 解构 composable 为顶层绑定，模板中自动解包 ref
-const s = useSearch(() => props.editor, props.doSaveChapter)
+const s = useSearch(toRef(props, 'editor'), props.doSaveChapter)
 
 const {
   showSearch, showReplace, searchQuery, replaceText,

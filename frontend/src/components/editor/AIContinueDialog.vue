@@ -49,7 +49,7 @@ async function handleContinueWrite() {
   continueLoading.value = true
 
   while (shouldRetry()) {
-    if (isCanceled()) { closeDialog(); return }
+    if (isCanceled()) { return } // 取消已在 cancelContinue 处理
 
     continueResult.value = ''
     generateProgress.value = 0
@@ -93,7 +93,7 @@ async function handleContinueWrite() {
       incrementRetry()
     } catch (e: any) {
       stopProgress()
-      if (e.name === 'AbortError') { closeDialog(); return }
+      if (e.name === 'AbortError') { return } // 取消已在 cancelContinue 处理
       if (shouldRetry() && !isCanceled()) { incrementRetry(); continue }
       message.error(`续写失败: ${e.message}`)
       if (!continueResult.value) { showContinueResult.value = false }
@@ -108,8 +108,16 @@ async function handleContinueWrite() {
   continueLoading.value = false
 }
 
+/** 取消生成 → 真正中断请求，回到输入界面（不关闭对话框） */
 function cancelContinue() {
-  cleanupRequest()
+  cleanupRequest() // 中断请求 + 停止进度模拟
+  // 回到续写输入界面
+  continueLoading.value = false
+  showContinueResult.value = false
+  generateProgress.value = 0
+  generateStatus.value = ''
+  continueResult.value = ''
+  // 保留 continueRequirement，方便用户重新开始
 }
 
 function insertToChapterEnd() {

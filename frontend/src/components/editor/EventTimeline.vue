@@ -5,7 +5,7 @@ import {
   NInput, NSpace, NTimeline, NTimelineItem,
   NScrollbar, useMessage, useDialog, NEmpty, NText,
 } from 'naive-ui'
-import { AddOutline as AddIcon, CreateOutline as EditIcon, CloseOutline as CloseIcon } from '@vicons/ionicons5'
+import { AddOutline as AddIcon, CreateOutline as EditIcon, CloseOutline as CloseIcon, CaretUpOutline as UpIcon, CaretDownOutline as DownIcon } from '@vicons/ionicons5'
 import type { Event } from '@/types'
 
 const props = defineProps<{ events: Event[] }>()
@@ -16,7 +16,21 @@ const emit = defineEmits<{
 const message = useMessage()
 const dialog = useDialog()
 
-// ------ 编辑弹框状态 ------
+function moveUp(index: number) {
+  if (index <= 0) return
+  const list = [...props.events];
+  [list[index - 1], list[index]] = [list[index], list[index - 1]]
+  emit('update:events', list)
+}
+
+function moveDown(index: number) {
+  if (index >= props.events.length - 1) return
+  const list = [...props.events];
+  [list[index], list[index + 1]] = [list[index + 1], list[index]]
+  emit('update:events', list)
+}
+
+// ------ 编辑弹框 ------
 const showEdit = ref(false)
 const editingIndex = ref(-1)
 const editName = ref('')
@@ -75,7 +89,6 @@ function removeEvent(index: number) {
 
 <template>
   <div class="timeline-wrapper">
-    <!-- 顶部工具栏 -->
     <div class="timeline-toolbar">
       <n-button size="small" type="primary" @click="openAdd">
         <template #icon><n-icon><AddIcon/></n-icon></template>添加事件
@@ -83,14 +96,10 @@ function removeEvent(index: number) {
       <n-text v-if="events.length > 0" depth="3" style="font-size: 13px;">共 {{ events.length }} 个事件</n-text>
     </div>
 
-    <!-- 时间线内容 -->
     <n-scrollbar v-if="events.length > 0" class="timeline-scroll">
       <div class="timeline-inner">
         <n-timeline item-placement="left" :icon-size="28">
-          <n-timeline-item
-            v-for="(evt, i) in events"
-            :key="i"
-          >
+          <n-timeline-item v-for="(evt, i) in events" :key="i">
             <template #icon>
               <span class="timeline-num">{{ i + 1 }}</span>
             </template>
@@ -98,6 +107,13 @@ function removeEvent(index: number) {
               <div class="item-header">
                 <n-text strong>{{ evt.name }}</n-text>
                 <div class="item-actions">
+                  <!-- 上下移动 -->
+                  <n-button text size="small" :disabled="i === 0" @click="moveUp(i)">
+                    <template #icon><n-icon size="14"><UpIcon/></n-icon></template>
+                  </n-button>
+                  <n-button text size="small" :disabled="i === events.length - 1" @click="moveDown(i)">
+                    <template #icon><n-icon size="14"><DownIcon/></n-icon></template>
+                  </n-button>
                   <n-button text size="small" @click="openEdit(i)">
                     <template #icon><n-icon size="16"><EditIcon/></n-icon></template>
                   </n-button>
@@ -106,12 +122,10 @@ function removeEvent(index: number) {
                       <svg class="trash-icon" viewBox="0 0 512 512" width="16" height="16"
                         fill="none" stroke="currentColor" stroke-width="32"
                         stroke-linecap="round" stroke-linejoin="round">
-                        <!-- 盖子 + 提手（向上翻开） -->
                         <g class="trash-top">
                           <path d="M80 112h352" />
                           <path d="M192 112V72a23.93 23.93 0 0 1 24-24h80a23.93 23.93 0 0 1 24 24v40" />
                         </g>
-                        <!-- 桶身 -->
                         <path d="M112 112l20 320c.95 18.49 14.4 32 32 32h184c17.67 0 30.87-13.51 32-32l20-320" />
                         <path d="M256 176v224" />
                         <path d="M184 176l8 224" />
@@ -130,7 +144,6 @@ function removeEvent(index: number) {
       </div>
     </n-scrollbar>
 
-    <!-- 空状态 -->
     <n-empty v-else description="还没有事件" class="timeline-empty">
       <template #extra>
         <n-button size="small" @click="openAdd">添加第一个事件</n-button>
@@ -183,7 +196,7 @@ function removeEvent(index: number) {
   padding-top: 10px;
 }
 
-/* 事件标题行：名称后紧跟操作按钮 */
+/* 事件标题行 */
 .item-header {
   display: flex;
   align-items: center;
@@ -191,16 +204,14 @@ function removeEvent(index: number) {
 }
 .item-actions {
   display: flex;
-  gap: 6px;
+  gap: 2px;
   flex-shrink: 0;
   margin-left: 8px;
 
-  /* 编辑图标：hover 时笔杆轻旋 */
   :deep(.n-button:first-child:hover .n-icon) {
     animation: icon-wiggle 0.3s ease-in-out;
   }
 
-  /* 删除图标：hover 时盖子翻开 + 桶身下沉 */
   :deep(.n-button:last-child:hover .trash-top) {
     animation: trash-lid 0.35s ease-in-out;
   }
@@ -214,20 +225,16 @@ function removeEvent(index: number) {
   25% { transform: rotate(-8deg); }
   75% { transform: rotate(8deg); }
 }
-
 @keyframes trash-lid {
   0%, 100% { transform: rotate(0deg); }
   35% { transform: rotate(35deg); }
   65% { transform: rotate(20deg); }
 }
-
 @keyframes trash-drop {
   0%, 100% { transform: translateY(0); }
   35% { transform: translateY(3px); }
   65% { transform: translateY(1.5px); }
 }
-
-/* 盖子组：以右侧铰链（432, 112）为旋转原点 */
 .trash-icon .trash-top {
   transform-box: view-box;
   transform-origin: 432px 112px;
@@ -240,8 +247,7 @@ function removeEvent(index: number) {
   justify-content: center;
 }
 
-/* 序号圆点，替换 NTimelineItem 默认的 dot */
-/* 容器由 NaiveUI 控制宽高（--n-icon-size: 28px），flex 居中 */
+/* 序号圆点 */
 .timeline-num {
   display: flex;
   align-items: center;

@@ -124,13 +124,6 @@ function handleIgnore() {
     @update:show="$event === false && emit('update:show', false)">
     <template v-if="extractResult">
       <div class="extract-preview">
-        <!-- 大纲 -->
-        <div class="extract-section">
-          <div class="extract-label">大纲</div>
-          <div class="extract-value" :class="{ 'is-new': extractResult.outline && extractResult.outline !== (existingOutline || '') }">
-            {{ extractResult.outline || '（无变化）' }}
-          </div>
-        </div>
         <!-- 新增角色 -->
         <div class="extract-section">
           <div class="extract-label">角色（新增 {{ countNew(extractResult.characters, existingCharacters || [], 'name') }} 个）</div>

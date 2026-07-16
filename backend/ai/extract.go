@@ -135,11 +135,7 @@ func (c *DeepSeekClient) ExtractNovelInfo(chapters []models.Chapter, fullContent
 ) (*models.ExtractionResult, error) {
 	chapterSummaries := ""
 	for i, ch := range chapters {
-		contentPreview := ch.Content
-		if len([]rune(contentPreview)) > 500 {
-			contentPreview = string([]rune(contentPreview)[:500]) + "..."
-		}
-		chapterSummaries += fmt.Sprintf("第%d章 %s:\n%s\n\n", i+1, ch.Title, contentPreview)
+		chapterSummaries += fmt.Sprintf("第%d章 %s:\n%s\n\n", i+1, ch.Title, ch.Content)
 	}
 	if fullContent == "" {
 		fullContent = chapterSummaries
@@ -147,7 +143,7 @@ func (c *DeepSeekClient) ExtractNovelInfo(chapters []models.Chapter, fullContent
 
 	existingCtx := ""
 	if existingOutline != "" || len(existingChars) > 0 || len(existingRels) > 0 || len(existingEvents) > 0 {
-		existingCtx = "【已有元数据（请结合已有信息与新增内容，输出最完整的版本，包含已有和新识别的内容）】\n"
+		existingCtx = "【已有元数据（仅作参考背景，了解已有哪些内容，避免重复提取）】\n"
 		if existingOutline != "" {
 			existingCtx += "已有大纲：" + existingOutline + "\n"
 		}
@@ -189,14 +185,14 @@ func (c *DeepSeekClient) ExtractNovelInfo(chapters []models.Chapter, fullContent
   "outline": "完整的故事大纲，包括起承转合、主要情节线",
   "characters": [{"name": "角色名", "description": "角色详细描述", "alias": "别名", "traits": "性格特征"}],
   "relationships": [{"source": "角色A", "target": "角色B", "relationType": "关系类型（如：朋友/敌人/恋人/师徒等）", "description": "关系描述"}],
-  "events": [{"name": "事件名称", "description": "事件详细描述", "timeOrder": "时间顺序（如：序章/第一章/事件一/时间点等）", "relatedChars": ["关联角色1", "关联角色2"]}]
+  "events": [{"name": "事件名称", "description": "完整描述该情节——谁、因何而起、做了什么、导致什么结果，需完整交代前因后果", "timeOrder": "时间顺序（如：序章/第一章/事件一/时间点等）", "relatedChars": ["关联角色1", "关联角色2"]}]
 }
 
 小说内容：
 %s`, existingCtx, fullContent)
 
 	messages := []models.Message{
-		{Role: "system", Content: "你是一个专业的小说编辑助手，擅长从小说文本中提取结构化信息。如果提供了已有元数据，请务必在输出中包含已有信息与新识别的内容，输出完整的元数据。请始终用JSON格式回复。"},
+		{Role: "system", Content: "你是一个专业的小说编辑助手，擅长从小说文本中提取结构化信息。已有元数据仅作参考背景，避免重复提取。只返回本次分析新识别的内容。请始终用JSON格式回复。"},
 		{Role: "user", Content: prompt},
 	}
 

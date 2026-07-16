@@ -36,16 +36,32 @@ const localEvents = ref<Event[]>([])
 let autoSaveTimer: ReturnType<typeof setTimeout> | null = null
 let initialized = false
 
+/** 同步本地状态与 store 一致（回滚用） */
+function syncFromStore() {
+  const n = novel.value
+  if (!n) return
+  localDescription.value = n.description || ''
+  localOutline.value = n.outline || ''
+  localCharacters.value = JSON.parse(JSON.stringify(n.characters || []))
+  localRelationships.value = JSON.parse(JSON.stringify(n.relationships || []))
+  localEvents.value = JSON.parse(JSON.stringify(n.events || []))
+}
+
 async function doAutoSave() {
   if (!novel.value) return
   saving.value = true
-  await novelStore.updateNovelMeta(novel.value.id, {
+  const ok = await novelStore.updateNovelMeta(novel.value.id, {
     description: localDescription.value.trim() || undefined,
     outline: localOutline.value.trim() || undefined,
     characters: localCharacters.value,
     relationships: localRelationships.value,
     events: localEvents.value,
   })
+  if (!ok) {
+    // 保存失败 → 回滚本地状态，保持 UI 与 store/后端一致
+    syncFromStore()
+    message.warning('保存失败，已回滚', { duration: 3000 })
+  }
   saving.value = false
 }
 
@@ -111,32 +127,28 @@ const totalWords = computed(() =>
   >
     <!-- 内容区：flex-fill 撑满 n-card 高度 -->
     <div class="info-body">
-      <n-tabs type="line" animated class="info-tabs" default-value="overview">
-        <!-- Tab 1: 简介与大纲 -->
-        <n-tab-pane name="overview" tab="简介与大纲">
-          <n-scrollbar class="tab-scroll">
-            <div class="tab-pane-inner">
-              <div class="field-section">
-                <n-text depth="3" class="field-label">小说简介</n-text>
-                <n-input
-                  v-model:value="localDescription"
-                  type="textarea" placeholder="输入小说简介..."
-                  :rows="4" :maxlength="2000" show-count
-                  :resizable="false"
-                />
-              </div>
-              <div class="field-section fill">
-                <n-text depth="3" class="field-label">故事大纲</n-text>
-                <n-input
-                  v-model:value="localOutline"
-                  type="textarea" placeholder="输入故事大纲，支持多段落..."
-                  :maxlength="50000" show-count
-                  class="outline-input"
-                  :resizable="false"
-                />
-              </div>
+      <n-tabs type="line" animated class="info-tabs" default-value="outline">
+        <!-- Tab 1: 故事大纲（融合大纲 + 时间线） -->
+        <n-tab-pane name="outline" tab="故事大纲">
+          <div class="outline-layout">
+            <!-- 小说简介（简短说明） -->
+            <div class="outline-desc">
+              <n-text depth="3" class="field-label">小说简介</n-text>
+              <n-input
+                v-model:value="localDescription"
+                type="textarea" placeholder="输入小说简介..."
+                :rows="2" :maxlength="2000" show-count
+                :resizable="false"
+              />
             </div>
-          </n-scrollbar>
+            <div class="outline-divider" />
+            <!-- 时间线即大纲：有序事件列表 -->
+            <div class="outline-timeline">
+              <EventTimeline
+                v-model:events="localEvents"
+              />
+            </div>
+          </div>
         </n-tab-pane>
 
         <!-- Tab 2: 人物关系图 -->
@@ -149,15 +161,7 @@ const totalWords = computed(() =>
           />
         </n-tab-pane>
 
-        <!-- Tab 3: 事件时间线 -->
-        <n-tab-pane name="events" tab="事件时间线">
-          <EventTimeline
-            v-model:events="localEvents"
-            class="tab-fill"
-          />
-        </n-tab-pane>
-
-        <!-- Tab 4: 章节概览 -->
+        <!-- Tab 3: 章节概览 -->
         <n-tab-pane name="chapters" tab="章节概览">
           <n-scrollbar class="tab-scroll">
             <div class="tab-pane-inner">
@@ -267,16 +271,33 @@ const totalWords = computed(() =>
   font-size: 13px;
   font-weight: 500;
 }
-.dialog-modal {
-  .outline-input {
-    flex: 1;
-    resize: none;
-    min-height: 0;
 
-    & :deep(.n-input__textarea-el) {
-      height: 52vh !important;
-    }
-  }
+/* 合并的大纲 + 时间线布局 */
+.outline-layout {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+/* 顶部简介 */
+.outline-desc {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-bottom: 8px;
+}
+/* 分割线 */
+.outline-divider {
+  flex-shrink: 0;
+  height: 1px;
+  background: #e8e8e8;
+  margin: 0 0 8px 0;
+}
+/* 下半：时间线撑满剩余空间 */
+.outline-timeline {
+  flex: 1;
+  min-height: 0;
 }
 
 /* 章节概览统计 */

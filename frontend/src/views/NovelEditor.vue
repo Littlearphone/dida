@@ -49,16 +49,24 @@ const editor = useEditor({
   editorProps: {
     // 为搜索导航留出顶部间距，避免被搜索栏遮挡
     scrollMargin: { top: 80, right: 0, bottom: 40, left: 0 },
-    /** 粘贴纯文本时按双换行分段，保留段落结构 */
+    /** 粘贴纯文本：无换行直接插入（不破坏段落），有换行按段落拆分 */
     handlePaste: (view, event) => {
-      const text = event.clipboardData?.getData('text/plain')
+      const text = (event.clipboardData?.getData('text/plain') || '').trim()
       if (!text) return false // 有 HTML 时让默认处理器处理
 
       event.preventDefault()
-      // 按双换行拆分段，段落内单换行转 <br>
-      const paragraphs = text.split(/\n\s*\n/).filter(p => p.trim())
+      // 无换行 → 纯文本插入，避免产生额外分段（#粘贴换行bug）
+      if (!/\n/.test(text)) {
+        view.dispatch(view.state.tr.insertText(text))
+        return true
+      }
+      // 有换行 → 按双换行（段落）或单换行拆分
+      let paragraphs = text.split(/\n\s*\n/).filter(p => p.trim())
+      if (paragraphs.length <= 1) {
+        paragraphs = text.split(/\n+/).filter(p => p.trim())
+      }
       if (paragraphs.length === 0) {
-        view.dispatch(view.state.tr.insertText(text.trim()))
+        view.dispatch(view.state.tr.insertText(text))
         return true
       }
       const html = paragraphs
