@@ -1,0 +1,98 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    // ────────────── 开发用任务 ──────────────
+
+    {
+      "label": "dev: frontend (pnpm dev)",
+      "type": "shell",
+      "command": "pnpm",
+      "args": ["dev"],
+      "options": { "cwd": "${workspaceFolder}/frontend" },
+      "isBackground": true,
+      "problemMatcher": {
+        "owner": "vite",
+        "severity": "info",
+        "pattern": {
+          "regexp": ".*"
+        },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": "VITE v",
+          "endsPattern": "ready in"
+        }
+      },
+      "detail": "启动 Vite 开发服务器（端口 5173），代理 /api → localhost:18520"
+    },
+    {
+      "label": "dev: backend (go run)",
+      "type": "shell",
+      "command": "go",
+      "args": [
+        "run",
+        "-ldflags=-X main.devMode=true",
+        "${workspaceFolder}/backend/."
+      ],
+      "dependsOn": ["dev: frontend (pnpm dev)"],
+      "detail": "启动 Go 后端（开发模式，端口 18520），自动依赖前端 dev 服务器"
+    },
+
+    // ────────────── 构建任务 ──────────────
+
+    {
+      "label": "build: frontend",
+      "type": "shell",
+      "command": "pnpm",
+      "args": ["build"],
+      "options": { "cwd": "${workspaceFolder}/frontend" },
+      "group": { "kind": "build", "isDefault": true },
+      "detail": "构建前端（vue-tsc 类型检查 + vite build）"
+    },
+    {
+      "label": "build: backend (production)",
+      "type": "shell",
+      "command": "go",
+      "args": [
+        "build",
+        "-tags", "production",
+        "-buildvcs=false",
+        "-o", "${workspaceFolder}/dida.exe",
+        "-ldflags=-H=windowsgui",
+        "${workspaceFolder}/backend/."
+      ],
+      "dependsOn": ["copy: frontend dist"],
+      "group": "build",
+      "detail": "生产构建 Go 后端（需要先构建前端并复制到 backend/frontend/dist）"
+    },
+    {
+      "label": "build: all (完整构建)",
+      "type": "shell",
+      "command": "cmd",
+      "args": ["/c", "${workspaceFolder}/build/build.bat"],
+      "group": "build",
+      "detail": "执行完整构建脚本：pnpm install → pnpm build → 复制 → go build"
+    },
+    {
+      "label": "copy: frontend dist",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-Command",
+        "if (Test-Path '${workspaceFolder}/backend/frontend') { Remove-Item -Recurse -Force '${workspaceFolder}/backend/frontend' }; New-Item -ItemType Directory -Force -Path '${workspaceFolder}/backend/frontend/dist'; Copy-Item -Recurse '${workspaceFolder}/frontend/dist/*' '${workspaceFolder}/backend/frontend/dist/'"
+      ],
+      "detail": "将前端构建产物复制到 backend/frontend/dist（供 go:embed 打包）"
+    },
+
+    // ────────────── 代码检查 ──────────────
+
+    {
+      "label": "lint: frontend (vue-tsc)",
+      "type": "shell",
+      "command": "pnpm",
+      "args": ["exec", "vue-tsc", "-b", "--noEmit"],
+      "options": { "cwd": "${workspaceFolder}/frontend" },
+      "group": "build",
+      "detail": "前端 TypeScript 类型检查（不输出文件）"
+    }
+  ]
+}

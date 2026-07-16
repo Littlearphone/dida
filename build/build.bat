@@ -6,6 +6,9 @@ echo   AI 小说编辑器 - 构建脚本
 echo ========================================
 echo.
 
+setlocal enabledelayedexpansion
+
+REM 获取脚本所在目录的父目录（项目根目录）
 set ROOT_DIR=%~dp0..
 set BACKEND_DIR=%ROOT_DIR%\backend
 set FRONTEND_DIR=%ROOT_DIR%\frontend
@@ -38,7 +41,7 @@ echo 静态文件复制完成
 REM 3. 构建 Go 生产版本
 echo [3/3] 构建可执行文件...
 cd /d "%BACKEND_DIR%"
-go build -tags production -o "%ROOT_DIR%\dida.exe" -ldflags="-H=windowsgui" .
+go build -tags production -buildvcs=false -o "%ROOT_DIR%\dida.exe" -ldflags="-H=windowsgui" .
 if %errorlevel% neq 0 (
     echo Go 构建失败!
     pause
@@ -51,9 +54,10 @@ if exist "%BACKEND_DIR%\frontend" rmdir /s /q "%BACKEND_DIR%\frontend"
 
 echo.
 echo ========================================
-echo   ✅ 构建成功！输出: %ROOT_DIR%\dida.exe
+echo   构建成功！输出: %ROOT_DIR%\dida.exe
 echo   双击 dida.exe 即可运行
 echo ========================================
 echo.
 echo 提示: 运行时防火墙可能会询问网络访问，请允许。
+endlocal
 pause

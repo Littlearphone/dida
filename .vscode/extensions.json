@@ -1,0 +1,16 @@
+{
+  "recommendations": [
+    // Go 语言支持（调试、自动补全、格式化）
+    "golang.go",
+    // Vue 3 语言支持
+    "vue.volar",
+    // TypeScript 类型检查
+    "ms-vscode.vscode-typescript-next",
+    // 代码高亮与格式化
+    "esbenp.prettier-vscode",
+    // SCSS 语法支持（frontend 使用 sass）
+    "syler.sass-indented",
+    // 调试 Chrome/Edge 浏览器中的前端
+    "ms-edgedevtools.vscode-edge-devtools"
+  ]
+}
