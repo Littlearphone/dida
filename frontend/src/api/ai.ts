@@ -23,7 +23,7 @@ export async function splitChapters(content: string): Promise<SplitResult> {
   return res.json()
 }
 
-/** 提取小说信息（支持传入已有元数据进行增量提取） */
+/** 提取小说信息（支持传入已有元数据进行增量提取，支持取消和流式进度） */
 export async function extractInfo(data: {
   chapters: { id: string; title: string; content: string; order: number }[]
   fullContent?: string
@@ -31,17 +31,73 @@ export async function extractInfo(data: {
   existingCharacters?: Character[]
   existingRelations?: NovelRelationship[]
   existingEvents?: Event[]
-}): Promise<ExtractionResult> {
+}, signal?: AbortSignal, onChunk?: (text: string) => void): Promise<ExtractionResult> {
   const res = await fetch(`${BASE}/extract-info`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      // 有 onChunk 回调时请求 SSE 流式响应，实时显示 AI 原始输出
+      ...(onChunk ? { Accept: 'text/event-stream' } : {}),
+    },
     body: JSON.stringify(data),
+    signal,
   })
   if (!res.ok) {
-    const err = await res.json()
+    const err = await res.json().catch(() => ({}))
     throw new Error(err.error || 'AI提取失败')
   }
+
+  const contentType = res.headers.get('content-type') || ''
+
+  // SSE 流式模式：实时接收 AI 原始响应文本 + 最终结构化结果
+  if (onChunk && contentType.includes('text/event-stream')) {
+    return readExtractSSEStream(res, onChunk)
+  }
+
+  // 非流式模式
   return res.json()
+}
+
+/** 解析提取专用的 SSE 流：原始 chunks 通过 onChunk 回调，最后返回解析后的结构化结果 */
+async function readExtractSSEStream(
+  res: Response,
+  onChunk: (text: string) => void,
+): Promise<ExtractionResult> {
+  const reader = res.body!.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+
+    buffer += decoder.decode(value, { stream: true })
+    const parts = buffer.split('\n\n')
+    buffer = parts.pop() || ''
+
+    for (const part of parts) {
+      for (const line of part.split('\n')) {
+        if (!line.startsWith('data: ')) continue
+        const data = line.slice(6).trim()
+        if (data === '[DONE]') {
+          // 流结束但没有收到结果，抛错
+          throw new Error('AI提取未返回有效结果')
+        }
+
+        try {
+          const parsed = JSON.parse(data)
+          if (parsed.error) throw new Error(parsed.error)
+          if (parsed.text) onChunk(parsed.text)
+          // 最后一个事件携带结构化结果
+          if (parsed.result) return parsed.result as ExtractionResult
+        } catch (e: any) {
+          if (e.message && !e.message.includes('JSON')) throw e
+        }
+      }
+    }
+  }
+
+  throw new Error('AI提取响应不完整')
 }
 
 /** AI 续写

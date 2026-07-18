@@ -4,7 +4,7 @@
  */
 import { computed, nextTick, ref } from 'vue'
 import { useNovelStore } from '../stores/novel'
-import { Plugin, PluginKey } from '@tiptap/pm/state'
+import { Plugin, PluginKey, TextSelection } from '@tiptap/pm/state'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
 
 export interface SearchMatch {
@@ -95,21 +95,63 @@ export function useSearch(editor: any, doSaveChapter: () => Promise<boolean>) {
     return results
   }
 
-  async function navigateToChapterSearch(chapterId: string) {
+  /**
+   * 将选区滚动到指定匹配位置并更新高亮
+   * 合并 setSelection + scrollIntoView + decoration 为单次 dispatch，
+   * 避免多事务竞态导致滚动静默失败。
+   * view.focus() 必须在 dispatch 之前调用：scrollToSelection 在 dispatch
+   * 内部的 updateState 中执行，若编辑器没有 DOM 焦点，selectionToDOM 可能
+   * 静默失败，导致 startDOM 位于编辑器外，滚动被忽略。
+   */
+  function scrollToMatch(idx: number) {
+    const ed = editor.value
+    if (!ed || idx < 0 || idx >= matches.length) return
+    const m = matches[idx]
+    const { state, view } = ed
+    const tr = state.tr
+    tr.setSelection(TextSelection.create(state.doc, m.from, m.to))
+    tr.setMeta(searchPluginKey, { matchData: matches, currentIdx: idx })
+    tr.scrollIntoView()
+    // 先确保编辑器有 DOM 焦点，再派发事务（scrollToSelection 在 dispatch 内部执行）
+    view.focus()
+    view.dispatch(tr)
+  }
+
+  /**
+   * 跳转到指定章节的第 matchIndex 个匹配（0-based）
+   * @param matchIndex 匹配序号，默认 0（第一个）；点击 snippet 时传入对应的 si 索引
+   */
+  async function navigateToChapterSearch(chapterId: string, matchIndex: number = 0) {
     const ed = editor.value
     if (!ed) return
+    // 限制 matchIndex 不越界（matches 在 updateSearch 后填充）
+    const goTo = (idx: number) => {
+      if (matches.length === 0) return
+      const targetIdx = Math.min(idx, matches.length - 1)
+      currentMatchIndex.value = targetIdx + 1
+      scrollToMatch(targetIdx)
+    }
     if (novelStore.currentChapter?.id === chapterId) {
       updateSearch()
-      if (matches.length > 0) findNext()
+      goTo(matchIndex)
       return
     }
     await doSaveChapter()
     const ch = novelStore.chapters.find(c => c.id === chapterId)
     if (!ch) return
     novelStore.selectChapter(ch)
+    // 等待编辑器同步新章节内容（watch 触发 → dispatch → DOM 更新）
     await nextTick()
+    await new Promise(r => setTimeout(r, 80))
+    // 新文档需要重建高亮插件：先注销旧插件（按 key 清理），再重新注册
+    if (editor.value) {
+      editor.value.unregisterPlugin(searchPluginKey)
+      searchPlugin = null
+    }
     updateSearch()
-    if (matches.length > 0) findNext()
+    // 等待编辑器完成布局（requestAnimationFrame 保证 DOM 已渲染），再定位
+    await new Promise(r => requestAnimationFrame(r))
+    goTo(matchIndex)
   }
 
   // === Plugin 管理 ===
@@ -141,16 +183,29 @@ export function useSearch(editor: any, doSaveChapter: () => Promise<boolean>) {
   }
 
   function registerPlugin() {
-    searchPlugin = createSearchPlugin()
-    if (editor.value) {
-      editor.value.registerPlugin(searchPlugin)
-    }
+    // 编辑器未就绪时不设置 searchPlugin，留给 updateSearch 懒注册处理
+    if (!editor.value) return false
+    const plugin = createSearchPlugin()
+    editor.value.registerPlugin(plugin)
+    searchPlugin = plugin
+    return true
   }
 
   function unregisterPlugin() {
     if (searchPlugin && editor.value) {
       editor.value.unregisterPlugin(searchPluginKey)
+      searchPlugin = null
     }
+  }
+
+  /**
+   * 确保搜索插件已注册（懒注册）
+   * 解决 Vue 生命周期中子组件的 onMounted 先于父组件执行，
+   * 导致 registerPlugin() 调用时编辑器实例尚未创建的时序问题
+   */
+  function ensurePluginRegistered(): boolean {
+    if (searchPlugin) return true
+    return registerPlugin()
   }
 
   // === 搜索与导航 ===
@@ -158,6 +213,8 @@ export function useSearch(editor: any, doSaveChapter: () => Promise<boolean>) {
     const query = searchQuery.value
     const ed = editor.value
     if (!query || !ed) { clearHighlights(); allChapterMatches.value = []; return }
+    // 懒注册：首次搜索时确保插件已注册（编辑器此时必然已就绪）
+    if (!ensurePluginRegistered()) return
     matches = findMatchesInDoc(ed.state.doc, query)
     totalMatches.value = matches.length
     currentMatchIndex.value = matches.length > 0 ? 1 : 0
@@ -181,29 +238,19 @@ export function useSearch(editor: any, doSaveChapter: () => Promise<boolean>) {
     ed.view.dispatch(ed.state.tr.setMeta(searchPluginKey, { clear: true }))
   }
 
+  /** 跳转到下一个匹配（循环），合并 setSelection + scrollIntoView + decoration 为单次 dispatch */
   function findNext() {
     if (matches.length === 0 || !editor.value) return
     currentMatchIndex.value = (currentMatchIndex.value % matches.length) + 1
-    const idx = currentMatchIndex.value - 1
-    const m = matches[idx]
-    editor.value.commands.setTextSelection({ from: m.from, to: m.to })
-    editor.value.commands.scrollIntoView()
-    editor.value.view.dispatch(
-      editor.value.state.tr.setMeta(searchPluginKey, { matchData: matches, currentIdx: idx }),
-    )
+    scrollToMatch(currentMatchIndex.value - 1)
   }
 
+  /** 跳转到上一个匹配（循环），合并 setSelection + scrollIntoView + decoration 为单次 dispatch */
   function findPrev() {
     if (matches.length === 0 || !editor.value) return
     currentMatchIndex.value =
       currentMatchIndex.value <= 1 ? matches.length : currentMatchIndex.value - 1
-    const idx = currentMatchIndex.value - 1
-    const m = matches[idx]
-    editor.value.commands.setTextSelection({ from: m.from, to: m.to })
-    editor.value.commands.scrollIntoView()
-    editor.value.view.dispatch(
-      editor.value.state.tr.setMeta(searchPluginKey, { matchData: matches, currentIdx: idx }),
-    )
+    scrollToMatch(currentMatchIndex.value - 1)
   }
 
   // === 替换 ===
@@ -277,7 +324,9 @@ export function useSearch(editor: any, doSaveChapter: () => Promise<boolean>) {
         editor.value?.commands.setContent(updated.content || '')
       }
     }
-    allChapterMatches.value = searchAllChapters(query)
+    // 重新执行搜索以刷新编辑器内的高亮：替换后 query 的匹配数变为 0，高亮自动清除
+    // allChapterMatches 由 updateSearch 在 searchAll 模式下同步更新，无需手动赋值
+    nextTick(() => updateSearch())
     return true
   }
 

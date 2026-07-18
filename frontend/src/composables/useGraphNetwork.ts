@@ -13,6 +13,7 @@ export function useGraphNetwork(
   containerRef: { value: HTMLDivElement | undefined },
   characters: { value: Character[] },
   relationships: { value: NovelRelationship[] | undefined },
+  origIdxFn?: (subIdx: number) => number,
 ) {
   let graph: Graph | null = null
   let graphBuilt = false
@@ -75,7 +76,7 @@ export function useGraphNetwork(
     })
 
     // 添加节点
-    const nodeConfigs = buildNodes(chars)
+    const nodeConfigs = buildNodes(chars, origIdxFn)
     nodeConfigs.forEach((cfg: any) => graph!.addNode(cfg))
 
     // 用户拖拽连线完成 → 弹出关系编辑对话框
@@ -90,13 +91,26 @@ export function useGraphNetwork(
     const edgeConfigs = buildEdges(chars, relationships.value)
     edgeConfigs.forEach((cfg: any) => graph!.addEdge(cfg))
 
-    // 节点点击 → 编辑角色弹窗
+    // 节点双击 → 编辑角色（传名字，调用方按名反查原始索引）
     graph.on('node:dblclick', ({ node }) => {
-      const meta = node.getData<X6NodeMeta>()
-      if (meta && meta.index !== undefined) onNodeClick(meta.index)
+      const meta = node.getData()
+      if (meta?.name != null) onNodeClick(meta.name)
     })
 
-    // 标记构建完成（响应式，使模板可感知）
+    // 节点单击 → 高亮关系
+    graph.on('node:click', ({ node }: any) => {
+      const meta = node.getData()
+      if (meta?.name != null && onNodeSingleClick) {
+        onNodeSingleClick(meta.name)
+      }
+    })
+
+    // 点击画布空白 → 取消高亮
+    graph.on('blank:click', () => {
+      onBlankClick?.()
+    })
+
+    // 标记构建完成
     graphReady.value = true
 
     // 首次适应内容
@@ -107,10 +121,19 @@ export function useGraphNetwork(
     nextTick(() => onAfterBuild?.())
   }
 
-  let onNodeClick = (_nodeIdx: number) => {}
+  let onNodeClick = (_nodeName: string) => {}
+  let onNodeSingleClick: ((name: string) => void) | null = null
+  let onBlankClick: (() => void) | null = null
 
-  function setOnNodeClick(cb: (idx: number) => void) {
+  function setOnNodeClick(cb: (name: string) => void) {
     onNodeClick = cb
+  }
+
+  function setOnNodeSingleClick(cb: (name: string) => void) {
+    onNodeSingleClick = cb
+  }
+  function setOnBlankClick(cb: () => void) {
+    onBlankClick = cb
   }
 
   /** 拖拽连线完成回调（X6 自动创建边后触发），由使用者接管弹框流程 */
@@ -212,6 +235,8 @@ export function useGraphNetwork(
     getGraph,
     getNodeAtPoint,
     setOnNodeClick,
+		setOnNodeSingleClick,
+		setOnBlankClick,
     setOnEdgeConnected,
     setOnAfterBuild,
     setOnContainerResize,

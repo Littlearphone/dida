@@ -1,12 +1,16 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import { NModal, NButton, NIcon, NSpace, NTag, useMessage } from 'naive-ui'
+import { ref, watch } from 'vue'
+import { NModal, NButton, NIcon, NSpace, NTag, NSpin, useMessage } from 'naive-ui'
 import type { Character, Event, ExtractionResult, NovelRelationship } from '../../types'
 import { useNovelStore } from '../../stores/novel'
 
 const props = defineProps<{
   show: boolean
   extractResult: ExtractionResult | null
+  /** 是否正在提取中（流式传输期间为 true） */
+  loading?: boolean
+  /** 流式提取时累积的 AI 原始响应文本 */
+  streamText?: string
   currentNovelId?: string
   existingOutline?: string
   existingCharacters?: Character[]
@@ -122,7 +126,17 @@ function handleIgnore() {
   <n-modal :show="show" title="AI 提取到新元数据" preset="card"
     style="width: 520px; max-height: 70vh;" :mask-closable="false" draggable
     @update:show="$event === false && emit('update:show', false)">
-    <template v-if="extractResult">
+    <!-- 加载中：显示流式 AI 响应 + 旋转指示器 -->
+    <template v-if="loading">
+      <div class="extract-loading">
+        <n-spin size="small" />
+        <span class="extract-loading-label">AI 正在分析内容…</span>
+      </div>
+      <div class="extract-stream-box">
+        <div class="extract-stream-text">{{ streamText || '等待 AI 响应…' }}</div>
+      </div>
+    </template>
+    <template v-else-if="extractResult">
       <div class="extract-preview">
         <!-- 新增角色 -->
         <div class="extract-section">
@@ -160,7 +174,7 @@ function handleIgnore() {
       </div>
     </template>
     <template #footer>
-      <n-space justify="end">
+      <n-space v-if="!loading" justify="end">
         <n-button quaternary @click="handleIgnore">忽略</n-button>
         <n-button type="primary" :loading="applying" @click="handleApply">应用变更</n-button>
       </n-space>
@@ -169,6 +183,22 @@ function handleIgnore() {
 </template>
 
 <style lang="scss" scoped>
+.extract-loading {
+  display: flex; align-items: center; gap: 10px; margin-bottom: 12px;
+}
+.extract-loading-label {
+  font-size: 14px; color: #666; font-weight: 500;
+}
+.extract-stream-box {
+  max-height: 40vh; overflow-y: auto;
+  border: 1px solid #e8e8e8; border-radius: 8px; background: #fafafa;
+  padding: 14px 16px;
+}
+.extract-stream-text {
+  font-size: 13px; line-height: 1.8; color: #555;
+  white-space: pre-wrap; word-break: break-word;
+  font-family: 'Consolas', 'Courier New', monospace;
+}
 .extract-preview {
   display: flex; flex-direction: column; gap: 16px;
   max-height: 50vh; overflow-y: auto;

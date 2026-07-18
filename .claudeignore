@@ -1,0 +1,35 @@
+# 依赖目录
+node_modules/
+frontend/node_modules/
+
+# 构建输出
+frontend/dist/
+backend/frontend/
+*.exe
+go_build_*.exe
+*.test
+*.out
+
+# 锁文件（过大且无需用于理解代码）
+pnpm-lock.yaml
+frontend/pnpm-lock.yaml
+
+# IDE 配置
+.idea/
+*.swp
+*.swo
+*~
+
+# 操作系统文件
+Thumbs.db
+.DS_Store
+
+# TypeScript 构建缓存
+frontend/tsconfig.tsbuildinfo
+
+# 图片等二进制资源（非必要不读取）
+backend/icon.ico
+
+# 临时与日志
+*.log
+*.tmp

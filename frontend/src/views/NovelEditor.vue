@@ -86,7 +86,14 @@ const editor = useEditor({
     if (!contentChanged.value) contentChanged.value = true
     triggerAutoSave()
   },
+  // 选区变化时更新选中字数（ProseMirror 选区不触发 computed 重算，需手动追踪）
+  onSelectionUpdate: ({ editor: ed }) => {
+    const { from, to } = ed.state.selection
+    selectedWordCount.value = from !== to ? wc(ed.state.doc.textBetween(from, to)) : 0
+  },
 })
+
+const selectedWordCount = ref(0)
 
 function undo() {
   const ed = editor.value
@@ -143,10 +150,10 @@ provide(EDITOR_ACTIONS_KEY, {
 // === AI 弹框 & 提取 ===
 const {
   showContinueWrite, showAIEdit, showAISetup, showNovelInfo,
-  showExtractResult, extractResult, extractLoading,
+  showExtractResult, extractResult, extractLoading, extractStreamText,
   aiEditMode, pendingEditContent, refinedContinueResult, aiConfigured,
   openAIEdit, handleContinueEdit, handleReplaceExternal,
-  handlePostInsertExtract, handleExtractSupplement,
+  handlePostInsertExtract, handleExtractSupplement, cancelExtract,
 } = useAIDialogs(novelStore, settingsStore, editor, contentChanged, doSaveChapter, message)
 
 // === 导出 ===
@@ -200,6 +207,24 @@ function goBack() {
 
 // === 字数统计 ===
 const wordCount = computed(() => wc(editContent.value))
+
+// === 章节记忆：localStorage 持久化上次打开的章节，刷新后恢复 ===
+const CHAPTER_MEMORY_PREFIX = 'dida_last_chapter_'
+
+function saveLastChapterId(novelId: string, chapterId: string) {
+  try { localStorage.setItem(CHAPTER_MEMORY_PREFIX + novelId, chapterId) } catch { /* quota exceeded 等异常静默忽略 */ }
+}
+
+function getLastChapterId(novelId: string): string | null {
+  try { return localStorage.getItem(CHAPTER_MEMORY_PREFIX + novelId) } catch { return null }
+}
+
+// 章节切换时自动记住（覆盖侧边栏点击、AI 新建章节、拖拽排序后自动切换等所有场景）
+watch(currentChapter, (ch) => {
+  if (ch && novelStore.currentNovel) {
+    saveLastChapterId(novelStore.currentNovel.id, ch.id)
+  }
+})
 
 // === 格式化解多余空段落 ===
 const canFormat = computed(() => {
@@ -332,15 +357,19 @@ onMounted(async () => {
     setWindowTitle(n.title)
     await novelStore.loadChapters(n.id)
     if (novelStore.chapters.length > 0) {
-      novelStore.selectChapter(novelStore.chapters[0])
+      // 恢复上次打开的章节（localStorage 记忆），若不存在则回退到第一章
+      const savedId = getLastChapterId(n.id)
+      const targetChapter = (savedId && novelStore.chapters.find(c => c.id === savedId))
+        || novelStore.chapters[0]
+      novelStore.selectChapter(targetChapter)
       await nextTick()
       const { state, view, schema } = editor.value!
-      const html = toTiptapHtml(novelStore.chapters[0].content)
+      const html = toTiptapHtml(targetChapter.content)
       const doc = createDocument(html, schema)
       const tr = state.tr.replaceWith(0, state.doc.content.size, doc)
       tr.setMeta('addToHistory', false)
       view.dispatch(tr)
-      editContent.value = novelStore.chapters[0].content
+      editContent.value = targetChapter.content
       contentChanged.value = false
       hasUserEdited.value = false
     }
@@ -394,13 +423,15 @@ onUnmounted(() => {
         @split="handleSplitClick" />
 
       <EditorStatusBar
-        :wordCount="wordCount" :aiConfigured="aiConfigured" :contentChanged="contentChanged"
+        :wordCount="wordCount" :selectedWordCount="selectedWordCount"
+        :aiConfigured="aiConfigured" :contentChanged="contentChanged"
         :extractLoading="extractLoading"
         :novelTitle="novelStore.currentNovel?.title || ''"
         @continue="showContinueWrite = true"
         @polish="openAIEdit('polish')"
         @expand="openAIEdit('expand')"
         @extract="handleExtractSupplement"
+        @cancelExtract="cancelExtract"
         @setupAI="showAISetup = true"
         @showInfo="showNovelInfo = true"
         @export="handleExport" />
@@ -425,6 +456,7 @@ onUnmounted(() => {
       @cancel="cancelSplit" />
 
     <ExtractResultDialog v-model:show="showExtractResult" :extractResult="extractResult"
+      :loading="extractLoading" :streamText="extractStreamText"
       :currentNovelId="novelId"
       :existingOutline="novelStore.currentNovel?.outline"
       :existingCharacters="novelStore.currentNovel?.characters"

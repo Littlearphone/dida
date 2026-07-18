@@ -212,38 +212,65 @@ function confirmMerge() {
   message.success(`已合并 ${sources.length} 个角色到「${targetName}」`)
 }
 
-// === 环状布局 ===
-/** 应用环状排列（手动计算位置，无物理引擎） */
-function applyCircleLayout() {
+// === 图谱 ===
+// === 子图：只显示选中人物的关系网 ===
+const selectedIdx = ref(0)
+
+const subgraphChars = computed(() => {
+  if (props.characters.length === 0) return []
+  const idx = selectedIdx.value
+  if (idx < 0 || idx >= props.characters.length) {
+    selectedIdx.value = 0
+    return props.characters.length > 0 ? [props.characters[0]] : []
+  }
+  const focusName = props.characters[idx].name
+  const relatedNames = new Set<string>()
+  ;(props.relationships || []).forEach(r => {
+    if (r.source === focusName) relatedNames.add(r.target)
+    if (r.target === focusName) relatedNames.add(r.source)
+  })
+  const result: Character[] = [props.characters[idx]]
+  props.characters.forEach((c, i) => {
+    if (i !== idx && relatedNames.has(c.name)) result.push(c)
+  })
+  return result
+})
+
+const subgraphRels = computed(() => {
+  const names = new Set(subgraphChars.value.map(c => c.name))
+  return (props.relationships || []).filter(r => names.has(r.source) && names.has(r.target))
+})
+
+function selectCharacter(idx: number) {
+  selectedIdx.value = idx
+  // subgraphChars/subgraphRels 是 computed，变化后 useGraphNetwork 的 watch 会自动重建图
+}
+
+function applySubgraphLayout() {
   const graph = getGraph()
   if (!graph) return
   const el = containerRef.value
   if (!el) return
   const rect = el.getBoundingClientRect()
-  const count = props.characters.length
-  if (count < 2) return
+  const count = subgraphChars.value.length
+  if (count < 1) return
   const cx = rect.width / 2
   const cy = rect.height / 2
   const radius = Math.min(cx, cy) - 80
-  // 容器尺寸未稳定时跳过，等待下一次 resize 回调
-  if (radius < 100) return
-  props.characters.forEach((_, i) => {
+  if (radius < 80) return
+  for (let i = 0; i < count; i++) {
     const angle = (2 * Math.PI * i) / count - Math.PI / 2
     const node = graph.getCellById(`char-${i}`)
     if (node && node.isNode()) {
       node.setPosition({ x: cx + radius * Math.cos(angle), y: cy + radius * Math.sin(angle) })
     }
-  })
+  }
   graph.zoomToFit({ maxScale: 1, padding: 40 })
   graph.centerContent()
-  // 将 fit 后的缩放设为最小缩放，防止缩过头（保留 5% 余量）
   const zoom = graph.zoom()
-  if (zoom > 0) {
-    ;(graph as any).options.scaling.min = zoom * 0.95
-  }
+  if (zoom > 0) { ;(graph as any).options.scaling.min = zoom * 0.8 }
 }
 
-// === 图谱 ===
 const {
   graphReady,
   getGraph,
@@ -251,10 +278,23 @@ const {
   setOnEdgeConnected,
   setOnAfterBuild,
   setOnContainerResize,
-} = useGraphNetwork(containerRef, chars, rels)
+} = useGraphNetwork(containerRef, subgraphChars, subgraphRels, (i: number) => origIdxMap.value[i] ?? i)
 
-// 注册节点点击回调（打开编辑弹框）
-setOnNodeClick((idx: number) => openEdit(idx))
+// 子图索引 → 原始角色索引映射，确保编辑/连线操作找对人
+const origIdxMap = computed(() => {
+  const map: number[] = []
+  subgraphChars.value.forEach(c => {
+    const origIdx = props.characters.findIndex(oc => oc.name === c.name)
+    map.push(origIdx >= 0 ? origIdx : 0)
+  })
+  return map
+})
+
+// 节点双击回调：按名字反查原始索引再打开编辑
+setOnNodeClick((name: string) => {
+  const idx = props.characters.findIndex(c => c.name === name)
+  if (idx >= 0) openEdit(idx)
+})
 
 // 接管 X6 内置拖拽连线结果：移除自动边 → 弹出关系编辑框
 setOnEdgeConnected((edge: any) => {
@@ -284,51 +324,65 @@ setOnEdgeConnected((edge: any) => {
   showConnectDialog.value = true
 })
 
-// 图重建后自动恢复环状布局
-setOnAfterBuild(() => { nextTick(applyCircleLayout) })
+// 图重建后自动布局
+setOnAfterBuild(() => { nextTick(applySubgraphLayout) })
 
-// 容器尺寸变化（如 Tab 切换动画）后重新布局
-setOnContainerResize(() => { nextTick(applyCircleLayout) })
+// 容器尺寸变化后重新布局
+setOnContainerResize(() => { nextTick(applySubgraphLayout) })
 </script>
 
 <template>
   <div class="graph-wrapper">
-    <!-- 顶部工具栏 -->
-    <div class="graph-toolbar">
-      <div class="toolbar-actions">
-        <n-button class="toolbar-btn" size="small" secondary @click="openAdd">
-          <template #icon><n-icon><AddIcon/></n-icon></template>添加角色
-        </n-button>
-        <n-button class="toolbar-btn" size="small" secondary
-          @click="openMergeDialog"
-          :disabled="characters.length < 2">
-          <template #icon><n-icon><MergeIcon/></n-icon></template>合并
-        </n-button>
-        <n-button class="toolbar-btn" size="small" secondary
-          @click="applyCircleLayout"
-          :disabled="!graphReady">
-          <template #icon><n-icon><ReloadIcon/></n-icon></template>重新布局
-        </n-button>
+    <div class="graph-layout">
+      <div class="char-list-panel">
+        <div class="char-list-header">
+          <span class="char-list-title">{{ characters.length }} 个角色</span>
+          <n-button size="tiny" secondary @click="openAdd" title="添加角色">
+            <template #icon><n-icon size="14"><AddIcon/></n-icon></template>
+          </n-button>
+        </div>
+        <div class="char-list-body">
+          <div
+            v-for="(c, i) in characters"
+            :key="c.name"
+            class="char-list-item"
+            :class="{ active: i === selectedIdx }"
+            @click="selectCharacter(i)"
+          >
+            <div class="char-list-name">{{ c.name }}</div>
+            <div class="char-list-rel-count">
+              {{ (relationships || []).filter(r => r.source === c.name || r.target === c.name).length }} 条关系
+            </div>
+          </div>
+          <n-empty v-if="characters.length === 0" description="还没有角色" style="margin-top: 40px;">
+            <template #extra>
+              <n-button size="small" @click="openAdd">添加第一个角色</n-button>
+            </template>
+          </n-empty>
+        </div>
+        <div class="char-list-footer">
+          <n-button size="tiny" quaternary @click="openMergeDialog" :disabled="characters.length < 2">
+            <template #icon><n-icon size="14"><MergeIcon/></n-icon></template>合并角色
+          </n-button>
+        </div>
       </div>
-      <div class="toolbar-info">
-        <n-text v-if="characters.length > 0" depth="3" style="font-size: 13px;">
-          {{ characters.length }} 个角色
-        </n-text>
-      </div>
-    </div>
 
-    <!-- X6 画布（自带拖拽连线预览） -->
-    <div v-if="characters.length > 0" class="graph-area">
-      <div ref="containerRef" class="graph-container" />
+      <div class="graph-panel">
+        <div class="graph-header" v-if="subgraphChars.length > 0">
+          <span class="graph-title">{{ subgraphChars[0].name }} 的关系网</span>
+          <span class="graph-subtitle">{{ subgraphChars.length - 1 }} 个关联角色 · {{ subgraphRels.length }} 条关系</span>
+          <n-button size="tiny" secondary @click="applySubgraphLayout" :disabled="!graphReady" style="margin-left: auto;">
+            <template #icon><n-icon size="14"><ReloadIcon/></n-icon></template>重新布局
+          </n-button>
+        </div>
+        <div v-if="characters.length > 0" class="graph-area">
+          <div ref="containerRef" class="graph-container" />
+        </div>
+        <div v-if="characters.length > 0 && subgraphRels.length === 0 && subgraphChars.length === 1" class="graph-hint">
+          {{ subgraphChars[0].name }} 还没有建立关系，从节点拖拽连线即可创建
+        </div>
+      </div>
     </div>
-    <div v-if="characters.length > 0 && !hasRelationships" class="graph-hint">
-      从节点拖拽到目标角色即可建立关系
-    </div>
-    <n-empty v-if="characters.length === 0" description="还没有角色" class="graph-empty">
-      <template #extra>
-        <n-button size="small" @click="openAdd">添加第一个角色</n-button>
-      </template>
-    </n-empty>
 
     <!-- 角色编辑弹框 -->
     <n-modal class="dialog-modal" :show="showEdit" title="编辑角色" preset="card"
@@ -438,64 +492,111 @@ setOnContainerResize(() => { nextTick(applyCircleLayout) })
   min-height: 0;
 }
 
-.graph-toolbar {
+/* 左右分栏 */
+.graph-layout {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: 0;
+}
+
+/* 左侧人物列表 */
+.char-list-panel {
+  width: 180px;
   flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid #eee;
+  background: #fafafa;
+}
+.char-list-header {
+  padding: 10px 12px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 8px;
+  border-bottom: 1px solid #eee;
 }
-
-.toolbar-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+.char-list-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #555;
 }
-
-.toolbar-btn { --n-border-color: #d9d9d9; }
-
-.toolbar-btn.active {
-  --n-text-color: #2080f0 !important;
-  --n-border-color: #2080f0 !important;
-  --n-color: #ecf5ff !important;
-}
-
-.toolbar-info { flex-shrink: 0; }
-
-/* X6 画布容器 */
-.graph-area {
+.char-list-body {
   flex: 1;
-  min-height: 0;
-  position: relative;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+.char-list-item {
+  padding: 8px 12px;
+  cursor: pointer;
+  transition: background .12s;
+  border-left: 3px solid transparent;
+  &:hover { background: #e8f0fe; }
+  &.active {
+    background: #d4e8ff;
+    border-left-color: #2080f0;
+  }
+}
+.char-list-name {
+  font-size: 13px;
+  color: #333;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.char-list-rel-count {
+  font-size: 11px;
+  color: #999;
+  margin-top: 2px;
+}
+.char-list-footer {
+  padding: 6px 12px;
+  border-top: 1px solid #eee;
+}
+
+/* 右侧关系子图 */
+.graph-panel {
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
 }
-.graph-container {
-  flex: 1;
-  min-height: 150px;
-  position: relative;
-  border: 1px solid #eee;
-  border-radius: 6px;
-  background: #fafafa;
-  overflow: hidden;
-}
-
-/* 无关系提示 */
-.graph-hint {
+.graph-header {
   flex-shrink: 0;
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-bottom: 1px solid #eee;
+}
+.graph-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #333;
+}
+.graph-subtitle {
+  font-size: 12px;
+  color: #999;
+}
+.graph-area {
+  flex: 1;
+  min-height: 0;
+}
+.graph-container {
+  width: 100%;
+  height: 100%;
+  min-height: 150px;
+  background: #fafafa;
+}
+.graph-hint {
   padding: 6px 12px;
   background: #f0f5ff;
   border-radius: 4px;
   font-size: 12px;
   color: #888;
   text-align: center;
-}
-
-.graph-empty {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  margin: 0 8px 8px;
 }
 
 /* 关系列表 */

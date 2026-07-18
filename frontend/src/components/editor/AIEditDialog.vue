@@ -4,7 +4,7 @@ import {
   NModal, NAlert, NForm, NFormItem, NInput, NButton, NGrid, NGi,
   NSpace, NIcon, NProgress, useMessage,
 } from 'naive-ui'
-import { CopyOutline as CopyIcon, SyncOutline as ReplaceIcon, CloseOutline as CloseIcon } from '@vicons/ionicons5'
+import { CopyOutline as CopyIcon, SyncOutline as ReplaceIcon, CloseOutline as CloseIcon, RefreshOutline as RefreshIcon } from '@vicons/ionicons5'
 import { useNovelStore } from '../../stores/novel'
 import { useAIStream } from '../../composables/useAIStream'
 import { htmlToPlainText, normalizeParagraphs } from '../../utils/editor'
@@ -195,6 +195,16 @@ function copyResult() {
   }
 }
 
+/** 对当前结果不满意，回到输入阶段重新生成（保留要求文本） */
+function retryEdit() {
+  cleanupRequest()
+  showResult.value = false
+  editResult.value = ''
+  progress.value = 0
+  progressText.value = ''
+  // 保留 requirement 和 hasSelection/savedSelectionText，方便重新发起
+}
+
 function closeDialog() {
   cleanupRequest()
   emit('update:show', false)
@@ -307,6 +317,9 @@ onUnmounted(() => {
         <template v-else>
           <n-button quaternary @click="closeDialog">
             <template #icon><n-icon><CloseIcon/></n-icon></template>关闭
+          </n-button>
+          <n-button quaternary @click="retryEdit">
+            <template #icon><n-icon><RefreshIcon/></n-icon></template>重新生成
           </n-button>
           <n-button quaternary @click="copyResult">
             <template #icon><n-icon><CopyIcon/></n-icon></template>复制

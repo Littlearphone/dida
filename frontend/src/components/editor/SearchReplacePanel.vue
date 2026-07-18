@@ -2,7 +2,7 @@
 /**
  * 搜索/替换面板 — UI 层，核心逻辑由 useSearch 管理
  */
-import { onMounted, onUnmounted, toRef } from 'vue'
+import { nextTick, onMounted, onUnmounted, ref, toRef, watch } from 'vue'
 import { useSearch } from '../../composables/useSearch'
 import { NButton, NIcon, NInput, NText } from 'naive-ui'
 import {
@@ -42,6 +42,29 @@ function handleKeydown(e: KeyboardEvent) {
   if (e.key === 'Escape') { closeSearch(); e.preventDefault(); return }
 }
 
+// 输入框 DOM 引用，用于面板打开时自动聚焦
+const searchInputRef = ref<InstanceType<typeof NInput> | null>(null)
+const replaceInputRef = ref<InstanceType<typeof NInput> | null>(null)
+
+// 面板打开时自动聚焦搜索框，有搜索词时全选方便改
+watch(showSearch, (open) => {
+  if (open) {
+    nextTick(() => {
+      const el = (searchInputRef.value as any)?.$el?.querySelector('input')
+      if (el) { el.focus(); el.select() }
+    })
+  }
+})
+// 替换行出现时聚焦替换框
+watch(showReplace, (open) => {
+  if (open) {
+    nextTick(() => {
+      const el = (replaceInputRef.value as any)?.$el?.querySelector('input')
+      if (el) el.focus()
+    })
+  }
+})
+
 defineExpose({
   isOpen: s.isOpen,
   isReplaceOpen: s.isReplaceOpen,
@@ -65,7 +88,7 @@ onUnmounted(() => { unregisterPlugin(); document.removeEventListener('keydown', 
           <span class="scope-btn" :class="{ active: searchAll }"
             @click="searchAll = true; updateSearch()">全书</span>
         </div>
-        <n-input v-model:value="searchQuery" placeholder="搜索正文..." size="small"
+        <n-input ref="searchInputRef" v-model:value="searchQuery" placeholder="搜索正文..." size="small"
           class="search-input" style="width:200px"
           @update:value="updateSearch()"
           @keydown.enter="findNext()" />
@@ -99,19 +122,15 @@ onUnmounted(() => { unregisterPlugin(); document.removeEventListener('keydown', 
           <span class="scope-divider">|</span>
           <span class="scope-btn">全书</span>
         </span>
-        <n-input v-model:value="replaceText" placeholder="替换为..." size="small"
+        <n-input ref="replaceInputRef" v-model:value="replaceText" placeholder="替换为..." size="small"
           class="replace-input" style="width:200px" />
 
-        <template v-if="!searchAll">
-          <n-button size="tiny" :disabled="totalMatches === 0 || !replaceText"
-            @click="replaceCurrent()">替换</n-button>
-          <n-button size="tiny" :disabled="totalMatches === 0 || !replaceText"
-            @click="replaceAll()">全部替换</n-button>
-        </template>
-        <template v-else>
-          <n-button size="tiny" :disabled="allSearchTotal === 0 || !replaceText"
-            @click="replaceAllInBook()">全书替换</n-button>
-        </template>
+        <n-button size="tiny" :disabled="totalMatches === 0 || !replaceText"
+          @click="replaceCurrent()">替换</n-button>
+        <n-button size="tiny" :disabled="totalMatches === 0 || !replaceText"
+          @click="replaceAll()">替换本章</n-button>
+        <n-button v-if="searchAll" size="tiny" :disabled="allSearchTotal === 0 || !replaceText"
+          @click="replaceAllInBook()">全书替换</n-button>
       </div>
 
       <div v-if="searchAll && allChapterMatches.length > 0" class="all-search-results">
@@ -120,7 +139,7 @@ onUnmounted(() => { unregisterPlugin(); document.removeEventListener('keydown', 
             {{ cm.chapterTitle }}（{{ cm.total }} 处）
           </div>
           <div v-for="(s, si) in cm.snippets.slice(0, 5)" :key="si"
-            class="all-search-snippet" @click="navigateToChapterSearch(cm.chapterId)">
+            class="all-search-snippet" @click="navigateToChapterSearch(cm.chapterId, si)">
             <span class="snippet-before">{{ s.before }}</span>
             <span class="snippet-match">{{ s.match }}</span>
             <span class="snippet-after">{{ s.after }}</span>

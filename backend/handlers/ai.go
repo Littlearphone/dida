@@ -85,7 +85,7 @@ func (h *AIHandler) HandleSplitChapters(w http.ResponseWriter, r *http.Request) 
 
 // HandleExtractInfo 提取小说信息（大纲、角色、关系、事件）
 // POST /api/ai/extract-info
-// 支持传入已有元数据进行增量提取
+// 支持 SSE 流式响应（Accept: text/event-stream）
 func (h *AIHandler) HandleExtractInfo(w http.ResponseWriter, r *http.Request) {
 	settings := h.settingsStore.Get()
 	if settings.APIKey == "" {
@@ -107,6 +107,44 @@ func (h *AIHandler) HandleExtractInfo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	client := h.createClient()
+
+	// SSE 流式模式：实时输出 AI 原始响应 + 最终结构化结果
+	accept := r.Header.Get("Accept")
+	if strings.Contains(accept, "text/event-stream") {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		w.Header().Set("X-Accel-Buffering", "no")
+
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			writeError(w, http.StatusInternalServerError, "不支持流式响应")
+			return
+		}
+
+		result, err := client.ExtractNovelInfoStream(req.Chapters, req.FullContent,
+			req.ExistingOutline, req.ExistingCharacters, req.ExistingRelations, req.ExistingEvents,
+			func(chunk string) {
+				data := fmt.Sprintf(`{"text":%s}`, jsonEncodeString(chunk))
+				fmt.Fprintf(w, "data: %s\n\n", data)
+				flusher.Flush()
+			})
+
+		if err != nil {
+			log.Printf("[API] 流式提取失败: %v", err)
+			errData := fmt.Sprintf(`{"error":"%s"}`, jsonEncodeString(err.Error()))
+			fmt.Fprintf(w, "data: %s\n\n", errData)
+		} else {
+			// 发送最终结构化结果
+			resultJSON, _ := json.Marshal(result)
+			fmt.Fprintf(w, "data: {\"result\":%s}\n\n", string(resultJSON))
+		}
+		fmt.Fprintf(w, "data: [DONE]\n\n")
+		flusher.Flush()
+		return
+	}
+
+	// 非流式模式（保持向后兼容）
 	result, err := client.ExtractNovelInfo(req.Chapters, req.FullContent,
 		req.ExistingOutline, req.ExistingCharacters, req.ExistingRelations, req.ExistingEvents)
 	if err != nil {
