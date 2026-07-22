@@ -1,6 +1,6 @@
 # AI 小说编辑器 · Dida
 
-[![Build & Release](https://github.com/Lenovo/dida/actions/workflows/release.yml/badge.svg)](https://github.com/Lenovo/dida/actions/workflows/release.yml)
+[![Build & Release](https://github.com/Littlearphone/dida/actions/workflows/release.yml/badge.svg)](https://github.com/Littlearphone/dida/actions/workflows/release.yml)
 
 一个基于 **Go + WebView2 + Vue3/NaiveUI** 的桌面端 AI 辅助小说编辑应用。Windows 平台双击 `dida.exe` 即可运行。
 
@@ -321,7 +321,7 @@ git tag v1.0.0
 git push origin v1.0.0
 
 # 2. Actions 自动构建并发布到
-#    https://github.com/Lenovo/dida/releases/tag/v1.0.0
+#    https://github.com/Littlearphone/dida/releases/tag/v1.0.0
 ```
 
 ### 手动下载产物
