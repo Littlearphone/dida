@@ -8,7 +8,7 @@ go_build_*.exe
 # Frontend
 frontend/node_modules/
 frontend/dist/
-frontend/pnpm-lock.yaml
+# frontend/pnpm-lock.yaml 必须提交以支持 CI 可复现构建
 
 # IDE
 .idea/
