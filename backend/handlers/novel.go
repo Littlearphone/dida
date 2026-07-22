@@ -272,23 +272,35 @@ func sanitizeFilename(name string) string {
 // exportPlainText 生成纯文本格式的完整小说内容
 func exportPlainText(novel *models.Novel, chapters []*models.Chapter) string {
 	var b strings.Builder
+	sep := strings.Repeat("━", 48)
 
+	// 小说标题上下有分割线
+	b.WriteString(sep + "\n")
 	b.WriteString(novel.Title + "\n")
+	b.WriteString(sep + "\n")
+	b.WriteString("\n")
 	if novel.Author != "" {
 		b.WriteString("作者：" + novel.Author + "\n")
 	}
 	if novel.Description != "" {
 		b.WriteString("简介：" + novel.Description + "\n")
 	}
-	b.WriteString(strings.Repeat("━", 48) + "\n\n")
+	if novel.Outline != "" {
+		b.WriteString("大纲：" + novel.Outline + "\n")
+	}
+	b.WriteString("\n")
 
 	for _, ch := range chapters {
+		// 标题：带上章节序号，上下各有一条分割线
 		title := ch.Title
 		if title == "" {
 			title = fmt.Sprintf("第%d章", ch.Order)
+		} else {
+			title = fmt.Sprintf("第%d章 %s", ch.Order, title)
 		}
+		b.WriteString(sep + "\n")
 		b.WriteString(title + "\n")
-		b.WriteString(strings.Repeat("─", 24) + "\n\n")
+		b.WriteString(sep + "\n\n")
 		b.WriteString(stripHTML(ch.Content) + "\n\n\n")
 	}
 
@@ -309,10 +321,14 @@ func exportMarkdown(novel *models.Novel, chapters []*models.Chapter) string {
 	b.WriteString("---\n\n")
 
 	for _, ch := range chapters {
+		// 标题：带上章节序号，前面有分割线
 		title := ch.Title
 		if title == "" {
 			title = fmt.Sprintf("第%d章", ch.Order)
+		} else {
+			title = fmt.Sprintf("第%d章 %s", ch.Order, title)
 		}
+		b.WriteString("---\n\n")
 		b.WriteString("## " + title + "\n\n")
 		b.WriteString(stripHTML(ch.Content) + "\n\n")
 	}

@@ -23,18 +23,24 @@ export function useExport(novelStore: any, message: MessageApiInjection) {
 
     // 构建纯文本内容
     const lines: string[] = []
+    const sep = '━'.repeat(48)
+    // 小说标题上下有分割线
+    lines.push(sep)
     lines.push(novel.title)
+    lines.push(sep)
+    lines.push('')
     if (novel.author) lines.push(`作者：${novel.author}`)
     if (novel.description) lines.push(`简介：${novel.description}`)
     if (novel.outline) lines.push(`大纲：${novel.outline}`)
     lines.push('')
-    lines.push('━'.repeat(48))
-    lines.push('')
 
     for (const ch of sorted) {
       const plain = stripHtml(ch.content)
-      lines.push(ch.title || `第${ch.order}章`)
-      lines.push('─'.repeat(24))
+      // 标题：带上章节序号，上下各有一条分割线
+      const title = ch.title ? `第${ch.order}章 ${ch.title}` : `第${ch.order}章`
+      lines.push(sep)
+      lines.push(title)
+      lines.push(sep)
       lines.push('')
       lines.push(plain)
       lines.push('')
