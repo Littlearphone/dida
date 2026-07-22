@@ -11,10 +11,17 @@ name: Build & Release
 
 on:
   push:
-    branches: [main, master]
     tags: ['v*']
   pull_request:
     branches: [main, master]
+
+  # 允许手动触发重新构建
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '要重新发布的标签（留空则仅构建验证）'
+        required: false
+        type: string
 
 jobs:
   build:

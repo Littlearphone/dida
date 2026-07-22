@@ -310,8 +310,8 @@ dida/
 | 事件 | 行为 |
 |------|------|
 | 推送 `v*` 标签 | 构建 `dida.exe` + 创建 GitHub Release |
-| 推送 `main`/`master` | 仅构建验证，不发布 |
-| Pull Request | 构建验证 |
+| Pull Request → `main`/`master` | 构建验证（不发布） |
+| 手动触发（`workflow_dispatch`） | 可指定标签重新发布，或留空仅构建验证 |
 
 ### 发布新版本
 
