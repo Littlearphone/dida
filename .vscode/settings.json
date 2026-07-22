@@ -47,5 +47,6 @@
   "files.insertFinalNewline": true,
   "editor.rulers": [120], // Go 官方风格 120 字符参考线
   "editor.tabSize": 2,
-  "editor.detectIndentation": false
+  "editor.detectIndentation": false,
+  "vue3snippets.enable-compile-vue-file-on-did-save-code": true
 }
